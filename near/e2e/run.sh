@@ -33,10 +33,25 @@ for i in $(seq 1 40); do curl -sf -m 1 http://127.0.0.1:8402/health >/dev/null &
 
 CONTRACT=$CONTRACT AGENT=$AGENT MANDATE_ID=1 CAP_YOCTO=$CAP python3 near/e2e/agent.py | tee e2e.log
 
+# Sandboxed agent: leave the agent only a function-call key that may call `pay` on the mandate contract.
+FULL_KEY=$(near account list-keys "$AGENT" $NET now 2>&1 | grep -o 'ed25519:[1-9A-HJ-NP-Za-km-z]*' | head -1)
+near_tx account add-key "$AGENT" grant-function-call-access --allowance '0.1 NEAR' --contract-account-id "$CONTRACT" \
+  --function-names pay autogenerate-new-keypair save-to-legacy-keychain
+near_tx account delete-keys "$AGENT" public-keys "$FULL_KEY"
+echo "== sandboxed agent keys:" | tee -a e2e.log
+near account list-keys "$AGENT" $NET now 2>&1 | tee -a e2e.log
+CONTRACT=$CONTRACT AGENT=$AGENT MANDATE_ID=1 CAP_YOCTO=$CAP ONLY_ONE=1 python3 near/e2e/agent.py | tee -a e2e.log
+if near_tx tokens "$AGENT" send-near "$OWNER" '0.05 NEAR' >steal.log 2>&1; then
+  echo "SECURITY FAIL: the sandboxed agent moved NEAR outside the mandate" | tee -a e2e.log; exit 1
+fi
+echo "== sandboxed agent could not send NEAR directly (only pay via the mandate is allowed)" | tee -a e2e.log
+tail -5 steal.log | tee -a e2e.log
+
 near contract call-function as-read-only "$CONTRACT" get_mandate json-args '{"mandate_id":1}' $NET now | tee -a e2e.log
 {
   echo "## NEAR testnet end-to-end"
   echo "- Contract: [$CONTRACT](https://testnet.nearblocks.io/address/$CONTRACT)"
   echo "- Owner: $OWNER · Agent: [$AGENT](https://testnet.nearblocks.io/address/$AGENT) · Merchant: [$MERCHANT](https://testnet.nearblocks.io/address/$MERCHANT)"
   echo "- Two requests paid through the mandate; a payment over the per-payment cap was refused by the contract."
+  echo "- Sandboxed agent (function-call key for \`pay\` only) paid again, and its direct NEAR transfer was rejected."
 } >> "$SUM"

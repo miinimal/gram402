@@ -62,6 +62,11 @@ def one_round(label, amount_override=None):
     return True, out
 
 
+if os.environ.get("ONLY_ONE"):
+    ok, _ = one_round("sandboxed agent payment (function-call key)")
+    assert ok, "sandboxed agent could not pay"
+    print("\nE2E OK: sandboxed agent paid through the mandate", flush=True)
+    sys.exit(0)
 ok1, _ = one_round("payment 1")
 ok2, _ = one_round("payment 2")
 assert ok1 and ok2, "paid rounds failed"
