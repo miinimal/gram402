@@ -156,22 +156,24 @@ nobody can make the contract pay for storage or squat invoice ids. A failed tran
 mandate; a failed refund on revoke re-activates it. Even a compromised agent cannot spend outside the limits: give it
 a function-call access key that may only call `pay`.
 
-Live run on NEAR testnet (CI workflow `near-e2e`, 2026-11-02):
+Live run on NEAR testnet (CI workflow `near-e2e`, contract v2, 2026-11-02):
 
 | Step | Transaction |
 |------|-------------|
-| Mandate created: 0.01 NEAR, cap 0.002 NEAR per payment, one merchant | [3aux4eL8…](https://testnet.nearblocks.io/txns/3aux4eL83GbEJbzZkgcYtVoqCxMK7Nax9wGnK65K7Nob) |
-| Agent pays invoice 1, gets the answer with a signed receipt | [5Bw3geXM…](https://testnet.nearblocks.io/txns/5Bw3geXMC9Z3wcy8T4XQsbJLC2L18hmDt2Z8MetNCFbZ) |
-| Agent pays invoice 2 | [9Yut41uR…](https://testnet.nearblocks.io/txns/9Yut41uR5sRD6uNHVpMYDPKG67kSmcsr7dZ2XTtRY6Pi) |
+| Mandate created: 0.02 NEAR deposit (storage + budget), cap 0.002 NEAR per payment, one merchant | [4rH7AfB4…](https://testnet.nearblocks.io/txns/4rH7AfB4ZD1Jpc2dwUyZFHLfd73u52WF5L5HPrv75jb6) |
+| Agent pays invoice 1; the server verifies the transaction and answers with a signed receipt | [7JR63ZrL…](https://testnet.nearblocks.io/txns/7JR63ZrLt8PTKMWXyNUmoPdpgtBUmmDQqkBWHJb5ad8h) |
+| Agent pays invoice 2 | [CM6b12ay…](https://testnet.nearblocks.io/txns/CM6b12ayhF2wK5bmyZmvmgCT9EaHSWTAxUi3ijN8ia3T) |
 | Payment over the cap: refused by the contract ("amount exceeds the per-payment cap") | — |
-| Agent's full-access key deleted; only a function-call key for `pay` on the mandate remains | [DVku76ah…](https://testnet.nearblocks.io/txns/DVku76ahMpsfZNNgpsH3oUe1AHktc3uVEexWibzPiUbu) |
-| Sandboxed agent still pays through the mandate | [ChgEQwAk…](https://testnet.nearblocks.io/txns/ChgEQwAkw2EEt5pepeZFx2U6SrnADEmggoERZJnFtia3) |
+| Agent's full-access key deleted; only a function-call key for `pay` on the mandate remains | [5WmpDRAi…](https://testnet.nearblocks.io/txns/5WmpDRAi1uWYvaZ1GYa8ki7ZV7s6CLpy8mG7DpUDMBd) |
+| Sandboxed agent still pays through the mandate | [C9ucv1kj…](https://testnet.nearblocks.io/txns/C9ucv1kjhH2At9HufhdWoSAYeNo5HaXjpVPUsASTAkeJ) |
 | Sandboxed agent tries to send NEAR directly: cannot be signed, a transfer needs a full-access key the agent no longer has | — |
+
+Contract: [mandate.g4021793640330-owner.testnet](https://testnet.nearblocks.io/address/mandate.g4021793640330-owner.testnet).
 
 Agent side: `clients/python/near_mandate.py` and `clients/typescript/near_mandate.ts` — `NearMandateClient(url, mandate_id, pay)` answers 402 by calling
 `pay` on the contract through your signing callback (any NEAR library or near-cli-rs), with its own price cap.
 
-Contract: [mandate.g4021793638522-owner.testnet](https://testnet.nearblocks.io/address/mandate.g4021793638522-owner.testnet).
+Contract: [mandate.g4021793640330-owner.testnet](https://testnet.nearblocks.io/address/mandate.g4021793640330-owner.testnet).
 Reproduce: `.github/workflows/near-e2e.yml` (fresh faucet accounts, deploy, mandate, agent payments).
 
 NEAR HACKATHON: work for the hackathon starts at baseline commit `5f3ba49`; see
