@@ -56,9 +56,12 @@ def paypal_paywall(app, prices, db_path=None):
                 b = json.loads(await read_body(receive) or b"{}")
             except ValueError:
                 return await reply(send, 400, {"error": "body must be JSON"})
-            with db() as c:
-                m = await paypal402.create_mandate(c, b.get("budget_cents", 500), b.get("per_request_cents", 25),
-                                                   b.get("days", 30), b.get("resources"))
+            try:
+                with db() as c:
+                    m = await paypal402.create_mandate(c, b.get("budget_cents", 500), b.get("per_request_cents", 25),
+                                                       b.get("days", 30), b.get("resources"))
+            except paypal402.RateLimited as e:
+                return await reply(send, 429, {"error": str(e)})
             return await reply(send, 200, m)
         mm = _MID.match(path)
         if not mm:

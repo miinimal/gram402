@@ -39,6 +39,11 @@ CURRENCY = ENV("PAYPAL_CURRENCY", "USD")
 TTL = int(ENV("PAY402_TTL_S", "1800"))
 SCHEME = "paypal-mandate"
 MAX_BUDGET_CENTS = int(ENV("PAYPAL_MAX_BUDGET_CENTS", "50000"))
+MAX_NEW_PER_HOUR = int(ENV("PAYPAL_MAX_NEW_MANDATES_PER_HOUR", "60"))  # abuse guard: setup tokens cost PayPal calls
+
+class RateLimited(Exception):
+    pass
+
 
 _transport = None  # tests inject httpx.MockTransport
 _token = {"value": None, "exp": 0}
@@ -98,6 +103,9 @@ async def _call(method, path, body=None, request_id=None):
 async def create_mandate(c, budget_cents, per_request_cents, days, resources=None, now=None):
     """Create a pending mandate and a PayPal setup token; returns the secret once and the approval link."""
     now = now or int(time.time())
+    recent = c.execute("SELECT count(*) FROM pp_mandates WHERE created>?", (now - 3600,)).fetchone()[0]
+    if recent >= MAX_NEW_PER_HOUR:
+        raise RateLimited("too many new mandates in the last hour; try again later")
     budget_cents = max(1, min(int(budget_cents), MAX_BUDGET_CENTS))
     per_request_cents = max(1, min(int(per_request_cents), budget_cents))
     mid, sec = "m_" + secrets.token_hex(8), secrets.token_urlsafe(24)
@@ -155,6 +163,8 @@ def revoke(c, mid, secret):
 def create_invoice(c, amount_cents, resource, now=None):
     now = now or int(time.time())
     inv = "p_" + secrets.token_hex(8)
+    if secrets.randbelow(50) == 0:  # housekeeping: unpaid invoices are useless after expiry
+        c.execute("DELETE FROM pp_invoices WHERE status='open' AND expires<?", (now - TTL,))
     c.execute("INSERT INTO pp_invoices(id,created,expires,amount_cents,resource) VALUES(?,?,?,?,?)",
               (inv, now, now + TTL, amount_cents, resource))
     return {"invoice": inv, "amount_cents": amount_cents, "expires": now + TTL}

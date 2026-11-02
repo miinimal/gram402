@@ -83,9 +83,12 @@ async def mandate_create(request: Request):
     if not paypal402.enabled():
         raise HTTPException(404, "PayPal rail is not configured")
     b = await request.json()
-    with db() as c:
-        return await paypal402.create_mandate(c, b.get("budget_cents", 500), b.get("per_request_cents", 25),
-                                              b.get("days", 30), b.get("resources"))
+    try:
+        with db() as c:
+            return await paypal402.create_mandate(c, b.get("budget_cents", 500), b.get("per_request_cents", 25),
+                                                  b.get("days", 30), b.get("resources"))
+    except paypal402.RateLimited as e:
+        raise HTTPException(429, str(e))
 
 
 OWNER_PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "owner.html")

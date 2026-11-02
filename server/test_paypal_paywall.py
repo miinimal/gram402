@@ -60,4 +60,7 @@ assert cl.delete(f"/v1/mandates/{m['mandate']}", headers={"X-Mandate-Secret": m[
 inv = cl.get("/v1/weather").json()["accepts"][0]["extra"]["invoice"]
 r = cl.get("/v1/weather", headers={"X-PAYMENT": pay(inv)})
 assert r.status_code == 402 and "revoked" in r.json()["error"]
+paypal402.MAX_NEW_PER_HOUR = 1
+r = cl.post("/v1/mandates", json={"budget_cents": 10, "per_request_cents": 5, "days": 1})
+assert r.status_code == 429, r.text
 print("paypal paywall OK")
