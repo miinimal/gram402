@@ -19,6 +19,7 @@ jobs:
       - run: python3 clients/python/test_minimalai_receipt.py
       - run: python3 clients/python/test_gram402_merchant.py
       - run: python3 clients/python/test_paywall.py
+      - run: python3 tools/test_x402probe.py
       - run: python3 clients/python/test_paypal_mandate.py
       - run: python3 clients/python/test_near_mandate.py
       - run: timeout 60 python3 demo/paypal_agent_demo.py

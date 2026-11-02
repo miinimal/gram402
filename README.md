@@ -203,6 +203,20 @@ Reproduce: `.github/workflows/near-e2e.yml` (fresh faucet accounts, deploy, mand
 NEAR HACKATHON: work for the hackathon starts at baseline commit `5f3ba49`; see
 [the diff](https://github.com/miinimal/gram402/compare/5f3ba49...main). Built with AI coding assistance (Claude).
 
+## x402 conformance probe
+
+Can a buyer agent turn this 402 into a payment? [`tools/x402probe.py`](tools/x402probe.py) validates the whole offer
+for x402 v1 (JSON body) and v2 (`PAYMENT-REQUIRED` header) and GRAM-402: every field of every payment option, the
+EIP-712 domain for `exact` on EVM, header vs body (by what the buyer pays, so v1 and v2 spellings of one offer agree),
+top-level fields vs `accepts`, and GET vs POST. Every verdict keeps the captured response and its SHA-256.
+
+```bash
+pip install httpx
+python3 tools/x402probe.py https://api.example.com/paid
+```
+
+Hosted, with a public evidence-backed table of real endpoints: https://ai.minimalcult.org/x402
+
 ## Security
 
 - Transfer comments are public on chain, so the invoice id never settles alone: the private `secret` is required.
