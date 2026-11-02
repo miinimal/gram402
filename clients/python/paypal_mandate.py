@@ -57,9 +57,17 @@ class MandateClient:
         xpay = base64.b64encode(json.dumps({"x402Version": 1, "scheme": SCHEME, "payload": {
             "mandate": self.mandate, "secret": self.secret, "invoice": acc["extra"]["invoice"]}}).encode()).decode()
         st, hd, out = self._req("POST", path, body, {"X-PAYMENT": xpay})
-        self.last_payment = (out.get("gram402") or {}).get("payment")
-        if self.last_payment is not None:
-            self.last_payment = {**self.last_payment, "mandate_left_cents": out["gram402"].get("mandate_left_cents")}
+        self.last_payment = None
+        g = out.get("gram402") if isinstance(out, dict) else None
+        if g and g.get("payment"):
+            self.last_payment = {**g["payment"], "mandate_left_cents": g.get("mandate_left_cents")}
+        else:  # any API behind a paywall: the settlement travels in the X-PAYMENT-RESPONSE header
+            raw = next((v for k, v in hd.items() if k.lower() == "x-payment-response"), None)
+            if raw:
+                try:
+                    self.last_payment = json.loads(base64.b64decode(raw + "=" * (-len(raw) % 4)))
+                except ValueError:
+                    self.last_payment = {"raw": raw}
         return st, out
 
     def chat(self, body):

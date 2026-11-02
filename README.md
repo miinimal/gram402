@@ -109,6 +109,9 @@ owner can check or revoke the mandate at any time.
 pip install -r server/requirements.txt
 python3 demo/paypal_agent_demo.py        # simulated PayPal, no account needed
 PAYPAL_CLIENT_ID=... PAYPAL_CLIENT_SECRET=... python3 demo/paypal_agent_demo.py   # live PayPal sandbox
+
+# an LLM agent shops in a small API marketplace with a 30-cent mandate; the server refuses what is over the cap
+LLM_URL=https://api.openai.com/v1 LLM_KEY=... LLM_MODEL=gpt-4o-mini python3 demo/ai_shopper.py   # any OpenAI-compatible LLM
 ```
 
 | Piece | File |

@@ -49,7 +49,9 @@ export class MandateClient {
     r = await post({ 'X-PAYMENT': xpay });
     const out = await r.json().catch(() => ({}));
     const g = out.gram402;
-    this.lastPayment = g?.payment ? { ...g.payment, mandate_left_cents: g.mandate_left_cents } : undefined;
+    const hdr = r.headers.get('x-payment-response');
+    this.lastPayment = g?.payment ? { ...g.payment, mandate_left_cents: g.mandate_left_cents }
+      : hdr ? JSON.parse(typeof atob === 'function' ? atob(hdr) : Buffer.from(hdr, 'base64').toString()) : undefined;
     return { status: r.status, body: out };
   }
 
