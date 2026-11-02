@@ -154,6 +154,12 @@ transfer and confirms it is genuine and unused. Payments go straight to the merc
    on `success` it serves the request and returns `X-PAYMENT-RESPONSE` = `x_payment_response`.
    `POST /v1/facilitator/verify` checks without consuming.
 
+Balance rail: an agent with a MINIMAL AI key may pay a facilitator invoice from its key balance instead of a chain
+transfer: `POST /v1/facilitator/pay {invoice, secret}` moves the amount to the merchant key at once (the withdrawable
+part stays withdrawable, credit-only GRAM stays credit-only), returns `x_payment` for the retry, and the merchant
+settles it like any payment (`rail: balance`, transaction `internal:<invoice>`). A merchant cannot pay its own invoice.
+Invoices advertise it in `extra.payFromBalance`; `Gram402Client(balance_key=...)` uses it and falls back to the wallet.
+
 Fee: max(0.001 GRAM, 0.5 %) per settled payment, reserved from the merchant's key when the invoice is created and
 released if the invoice expires unpaid (one grace hour after expiry for late confirmations). Terms:
 `GET /v1/facilitator`. A transaction settles at most one invoice; invoices are bound to the merchant key that made them.

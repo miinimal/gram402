@@ -21,12 +21,15 @@ class PaymentError(Exception):
 
 
 class Gram402Client:
-    def __init__(self, base_url, pay, max_nano=200_000_000, wait_s=120, poll_s=5, api_key=None, opener=None):
+    def __init__(self, base_url, pay, max_nano=200_000_000, wait_s=120, poll_s=5, api_key=None, opener=None,
+                 balance_key=None, facilitator="https://ai.minimalcult.org"):
         self.base = base_url.rstrip("/")
         self.pay, self.max_nano, self.wait_s, self.poll_s = pay, max_nano, wait_s, poll_s
         self.api_key = api_key
         self.last_payment = None
         self._open = opener or urllib.request.urlopen
+        # optional: a MINIMAL AI key; facilitator invoices are then paid from its balance (instant, no chain fee)
+        self.balance_key, self.facilitator = balance_key, facilitator.rstrip("/")
 
     def _post(self, path, body, headers):
         req = urllib.request.Request(self.base + path, data=json.dumps(body).encode(), method="POST",
@@ -94,9 +97,22 @@ class Gram402Client:
         if amount > self.max_nano:
             raise PaymentError(f"price {amount} nano-GRAM exceeds max_nano {self.max_nano}")
         ex = acc["extra"]
-        self.pay(acc["payTo"], amount, ex["comment"])
-        xpay = base64.b64encode(json.dumps({"x402Version": 1, "scheme": acc["scheme"], "network": acc["network"],
-                                            "payload": {"invoice": ex["invoice"], "secret": ex["secret"]}}).encode()).decode()
+        xpay = None
+        if self.balance_key and ex.get("payFromBalance"):
+            req2 = urllib.request.Request(self.facilitator + "/v1/facilitator/pay", method="POST",
+                                          data=json.dumps({"invoice": ex["invoice"], "secret": ex["secret"]}).encode(),
+                                          headers={"Content-Type": "application/json",
+                                                   "Authorization": "Bearer " + self.balance_key})
+            try:
+                with self._open(req2, timeout=60) as r:
+                    xpay = json.loads(r.read())["x_payment"]
+            except urllib.error.HTTPError as e:
+                if e.code != 402:   # 402 = balance too low: fall back to a wallet transfer
+                    raise PaymentError(f"balance payment failed: HTTP {e.code} {e.read()[:200]!r}")
+        if not xpay:
+            self.pay(acc["payTo"], amount, ex["comment"])
+            xpay = base64.b64encode(json.dumps({"x402Version": 1, "scheme": acc["scheme"], "network": acc["network"],
+                                                "payload": {"invoice": ex["invoice"], "secret": ex["secret"]}}).encode()).decode()
         deadline = time.time() + self.wait_s
         while True:
             st, hd, out = send({"X-PAYMENT": xpay})
