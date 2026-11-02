@@ -7,7 +7,7 @@ name: paypal-live
 on:
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write  # only to push the recordings to the demo-media branch
 concurrency: {group: paypal-live, cancel-in-progress: false}
 jobs:
   live:
@@ -31,3 +31,17 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with: {name: owner-page-recordings, path: "${{ runner.temp }}/rec/*.webm", if-no-files-found: ignore, retention-days: 14}
+      - name: publish recordings to the demo-media branch (for the video editor; no code)
+        if: always()
+        run: |
+          set -e
+          ls "$RUNNER_TEMP"/rec/*.webm >/dev/null 2>&1 || exit 0
+          out=$RUNNER_TEMP/media/paypal-${{ github.run_id }}; mkdir -p "$out"; i=0
+          for f in $(ls -tr "$RUNNER_TEMP"/rec/*.webm); do i=$((i+1))
+            ffmpeg -nostdin -y -loglevel error -i "$f" -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -r 30 "$out/owner-$i.mp4"; done
+          cp "$GITHUB_STEP_SUMMARY" "$out/summary.md" 2>/dev/null || true
+          cd "$RUNNER_TEMP/media"
+          git init -q -b demo-media && git add . 
+          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com commit -qm "PayPal demo recordings, run ${{ github.run_id }}"
+          git fetch -q "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" demo-media && git rebase -q FETCH_HEAD || true
+          git push -q "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" HEAD:demo-media
