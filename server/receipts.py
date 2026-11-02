@@ -65,6 +65,8 @@ def make(request_body, response_body, route, attestation, payment=None):
         payload["payment"] = {k: payment.get(k) for k in ("network", "transaction", "payer", "charged_nano")}
         if "charged_cents" in payment:  # PayPal rail: fiat amount and currency
             payload["payment"].update(charged_cents=payment["charged_cents"], currency=payment.get("currency"))
+        if "charged_yocto" in payment:  # NEAR rail
+            payload["payment"]["charged_yocto"] = payment["charged_yocto"]
     sig = key().sign(canon(payload))
     return {**payload, "sig": base64.b64encode(sig).decode()}
 

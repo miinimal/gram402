@@ -19,6 +19,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 import pay402
+import near402
 import paypal402
 import receipts
 
@@ -44,6 +45,7 @@ with db() as _c:
     _c.execute("CREATE TABLE IF NOT EXISTS keys(key_hash TEXT PRIMARY KEY, owner TEXT, created INTEGER, balance_nano INTEGER)")
     pay402.setup_db(_c)
     paypal402.setup_db(_c)
+    near402.setup_db(_c)
 
 
 def cost_nano(u):
@@ -74,7 +76,8 @@ async def answer(body):
 @app.get("/health")
 def health():
     return {"ok": True, "gram402": pay402.enabled(), "network": pay402.network_id(),
-            "paypal": paypal402.enabled() and paypal402.network_id(), "receipt_key": receipts.public_key_hex()}
+            "paypal": paypal402.enabled() and paypal402.network_id(),
+            "near": near402.enabled() and near402.network_id(), "receipt_key": receipts.public_key_hex()}
 
 
 @app.post("/v1/mandates")
@@ -167,7 +170,7 @@ async def chat(request: Request, authorization: str = Header(None)):
     if authorization and authorization.lower().startswith("bearer "):
         key_hash = h(authorization[7:].strip())
     else:
-        if not pay402.enabled() and not paypal402.enabled():
+        if not pay402.enabled() and not paypal402.enabled() and not near402.enabled():
             raise HTTPException(401, "missing bearer key")
         xp = request.headers.get("x-payment")
         if not xp:
@@ -179,10 +182,15 @@ async def chat(request: Request, authorization: str = Header(None)):
                 if paypal402.enabled():
                     req["accepts"].append(paypal402.accept(
                         paypal402.create_invoice(c, paypal402.PRICE_CENTS, res), res))
+                if near402.enabled():
+                    req["accepts"].append(near402.accept(near402.create_invoice(c, near402.PRICE_YOCTO, res), res))
             return JSONResponse(req, status_code=402)
         pclaim = paypal402.parse_header(xp) if paypal402.enabled() else None
         if pclaim:
             return await chat_paypal(body, pclaim)
+        nclaim = near402.parse_header(xp) if near402.enabled() else None
+        if nclaim:
+            return await chat_near(body, nclaim)
         claim = pay402.parse_header(xp)
         if not claim:
             return JSONResponse({"x402Version": 1, "error": "malformed X-PAYMENT header"}, status_code=400)
@@ -244,3 +252,21 @@ async def chat_paypal(body, claim):
                        "receipt": receipts.make(body, resp, "upstream" if UPSTREAM else "echo", None, pay),
                        "payment": pay}
     return JSONResponse(resp, headers={"X-PAYMENT-RESPONSE": paypal402.response_header(st)})
+
+
+async def chat_near(body, claim):
+    """Pay-per-request through the NEAR mandate contract: verify the on-chain payment, then answer with a receipt."""
+    with db() as c:
+        st = await near402.settle(c, claim)
+    if not st["ok"]:
+        return JSONResponse({"x402Version": 1, "error": st["error"]}, status_code=402,
+                            headers={"Retry-After": "3"} if st.get("retry") else None)
+    pay = {"network": st["network"], "transaction": st["transaction"], "payer": st["payer"], "charged_nano": None,
+           "charged_yocto": str(st["charged_yocto"])}
+    try:
+        resp = await answer(body)
+    except HTTPException as e:
+        return JSONResponse({"error": {"message": e.detail}, "payment": pay}, status_code=e.status_code)
+    resp["gram402"] = {"receipt": receipts.make(body, resp, "upstream" if UPSTREAM else "echo", None, pay),
+                       "payment": pay}
+    return JSONResponse(resp, headers={"X-PAYMENT-RESPONSE": near402.response_header(st)})
