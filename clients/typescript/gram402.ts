@@ -2,7 +2,8 @@
 //
 //   import { Gram402Client } from './gram402';
 //   const cli = new Gram402Client('https://gateway.example', async (to, nano, comment) => {
-//     await wallet.sendTransfer({ ..., messages: [internal({ to, value: nano, bounce: false, body: comment })] });
+//     await wallet.sendTransfer({ ..., sendMode: SendMode.PAY_GAS_SEPARATELY + SendMode.IGNORE_ERRORS,  // fee on top
+//       messages: [internal({ to, value: nano, bounce: false, body: comment })] });
 //   });
 //   const answer = await cli.chat({ model: 'Qwen/Qwen3-8B', messages: [{ role: 'user', content: 'hi' }] });
 //

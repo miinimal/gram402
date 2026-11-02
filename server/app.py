@@ -198,8 +198,9 @@ async def chat(request: Request, authorization: str = Header(None)):
         with db() as c:
             settlement = pay402.settle(c, claim, txs, new_key)
         if not settlement["ok"]:
-            return JSONResponse({"x402Version": 1, "error": settlement["error"]}, status_code=402,
-                                headers={"Retry-After": "5"} if settlement.get("retry") else None)
+            extra = {k: settlement[k] for k in ("api_key", "credit_nano", "tx_hash", "payer") if settlement.get("underpaid") and k in settlement}
+            return JSONResponse({"x402Version": 1, "error": settlement["error"], **({"underpaid": extra} if extra else {})},
+                                status_code=402, headers={"Retry-After": "5"} if settlement.get("retry") else None)
         key_hash = settlement["key_hash"]
     row = db().execute("SELECT balance_nano FROM keys WHERE key_hash=?", (key_hash,)).fetchone()
     if not row:

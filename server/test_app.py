@@ -73,7 +73,10 @@ def main():
     r3 = c.post("/v1/chat/completions", json=REQ).json()["accepts"][0]["extra"]
     CHAIN.append(tx("tx3", "mai:" + r3["invoice"], 1))
     r = c.post("/v1/chat/completions", json=REQ, headers={"X-PAYMENT": xpay(r3["invoice"], r3["secret"])})
-    assert r.status_code == 402                                                    # underpayment does not settle
+    assert r.status_code == 402 and r.json()["error"].startswith("underpaid")      # underpayment does not settle...
+    assert r.json()["underpaid"]["credit_nano"] == 1                               # ...but is credited, not lost
+    r = c.post("/v1/chat/completions", json=REQ, headers={"X-PAYMENT": xpay(r3["invoice"], r3["secret"])})
+    assert "closed as underpaid" in r.json()["error"]                              # credited once
     print("gram402 server OK")
 
 

@@ -69,6 +69,13 @@ agent                                   server (payTo = server wallet)
 A transfer of at least `maxAmountRequired` nano-GRAM to `payTo` with text comment `extra.comment`, sent before
 `expiresAt`. Any wallet version works. The sender address becomes the account owner (`payer`).
 
+**Network fee.** The payee must receive at least the invoice amount: send the transfer with the network fee paid on top
+of the value (wallet send mode 1, "pay fees separately"). A transfer
+that arrives short (the fee was taken out of the value) does not settle the invoice and is not lost: the server credits
+what arrived to an account bound to the payer's wallet, closes the invoice and answers `402` with `"error": "underpaid: ..."`
+and an `underpaid` object (`api_key`, `credit_nano`, `tx_hash`, `payer`). Found in the testnet demo on 2026-11-02, where a
+wallet that pays the fee from the value sent 0.009933 GRAM for a 0.01 GRAM invoice.
+
 ## Retry with X-PAYMENT
 
 ```

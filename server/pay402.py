@@ -93,8 +93,10 @@ def parse_header(value):
     return {"invoice": str(p["invoice"])[:32], "secret": str(p["secret"])[:128]}
 
 
-def find_payment(txs, invoice, min_nano):
-    """Pick the incoming transfer with comment mai:<invoice>; returns (tx_hash, payer, value_nano) or None."""
+def find_payment(txs, invoice, min_nano, short=None):
+    """Pick the incoming transfer with comment mai:<invoice>; returns (tx_hash, payer, value_nano) or None.
+    short: optional list; a matching transfer below min_nano (e.g. the wallet took the network fee out of the value)
+    is appended to it as (tx_hash, payer, value_nano) so the caller can credit it instead of losing it."""
     want = "mai:" + invoice
     for t in txs:
         im = t.get("in_msg") or {}
@@ -107,6 +109,8 @@ def find_payment(txs, invoice, min_nano):
         value = int(im.get("value") or 0)
         if value >= min_nano:
             return t["hash"], im["source"], value
+        if short is not None and value > 0:
+            short.append((t["hash"], im["source"], value))
     return None
 
 
@@ -132,7 +136,25 @@ def settle(c, claim, txs, new_key_fn, now=None):
         return {"ok": False, "error": "unknown invoice or wrong secret"}
     if row["status"] == "paid":
         return {"ok": False, "error": "invoice already settled; use the api_key returned with the first settlement"}
-    found = find_payment(txs, claim["invoice"], int(row["amount_nano"]))
+    short = []
+    found = find_payment(txs, claim["invoice"], int(row["amount_nano"]), short)
+    if not found and short:
+        # underpaid: never lose the payer's money. Credit what arrived to a key bound to its wallet and say so;
+        # no answer is served for this invoice (the price was not covered).
+        tx_hash, payer, value = short[0]
+        if not c.execute("SELECT 1 FROM pay_txs WHERE tx_hash=?", (tx_hash,)).fetchone() and \
+                c.execute("UPDATE pay_invoices SET status='underpaid' WHERE id=? AND status='open'", (claim["invoice"],)).rowcount == 1:
+            c.execute("INSERT INTO pay_txs VALUES(?,?,?)", (tx_hash, claim["invoice"], now))
+            api_key, key_hash = new_key_fn(c, payer, value, tx_hash)
+            c.execute("UPDATE pay_invoices SET tx_hash=?, payer=?, paid_nano=?, key_hash=? WHERE id=?",
+                      (tx_hash, payer, value, key_hash, claim["invoice"]))
+            return {"ok": False, "underpaid": True, "error": f"underpaid: received {value} nanoGRAM, the invoice needs "
+                    f"{int(row['amount_nano'])}. Send transfers with the network fee paid separately (send mode 1). What "
+                    "arrived is credited to an account for your wallet: use api_key as Bearer, or request a new invoice.",
+                    "api_key": api_key, "credit_nano": value, "tx_hash": tx_hash, "payer": payer}
+        return {"ok": False, "error": "invoice closed as underpaid; the amount was credited to the api_key returned then"}
+    if row["status"] == "underpaid":
+        return {"ok": False, "error": "invoice closed as underpaid; the amount was credited to the api_key returned then"}
     if not found:
         if now > row["expires"]:
             return {"ok": False, "error": "invoice expired and no payment found", "expired": True}
