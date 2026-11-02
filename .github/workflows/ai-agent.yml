@@ -23,7 +23,8 @@ jobs:
           LLM_KEY: ${{ secrets.GITHUB_TOKEN }}
           LLM_MODEL: openai/gpt-4o-mini
         run: |
-          timeout 300 python3 demo/ai_shopper.py | tee shopper.log
+          set -o pipefail
+          timeout 300 python3 demo/ai_shopper.py 2>&1 | tee shopper.log
           { echo '## AI shopper (real LLM)'; echo '```'; cat shopper.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()

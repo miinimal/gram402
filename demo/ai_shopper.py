@@ -15,6 +15,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -68,10 +69,19 @@ def llm(messages):
     req = urllib.request.Request(os.environ["LLM_URL"].rstrip("/") + "/chat/completions", method="POST",
                                  data=json.dumps({"model": os.environ.get("LLM_MODEL", "gpt-4o-mini"),
                                                   "messages": messages, "tools": TOOLS}).encode(),
-                                 headers={"Content-Type": "application/json",
+                                 headers={"Content-Type": "application/json", "Accept": "application/json",
+                                          "X-GitHub-Api-Version": "2022-11-28",
                                           "Authorization": "Bearer " + os.environ.get("LLM_KEY", "")})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        return json.loads(r.read())["choices"][0]["message"]
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            raw, status = r.read(), r.status
+    except urllib.error.HTTPError as e:
+        raise SystemExit(f"LLM HTTP {e.code}: {e.read()[:400]!r}")
+    try:
+        msg = json.loads(raw)["choices"][0]["message"]
+    except (ValueError, KeyError, IndexError):
+        raise SystemExit(f"LLM bad response (HTTP {status}): {raw[:400]!r}")
+    return {k: v for k, v in msg.items() if k in ("role", "content", "tool_calls")}
 
 
 def rule_planner(messages):
