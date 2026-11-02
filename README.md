@@ -24,6 +24,7 @@ agent ── POST + X-PAYMENT {invoice, secret} ▶ server: finds the transfer, 
 | [`server/app.py`](server/app.py) | Reference server: any OpenAI-compatible chat API, paid per request |
 | [`clients/python/gram402.py`](clients/python/gram402.py) | Python client, stdlib only |
 | [`clients/typescript/gram402.ts`](clients/typescript/gram402.ts) | TypeScript client, no dependencies |
+| [`clients/python/gram402_merchant.py`](clients/python/gram402_merchant.py) | Sell your API for GRAM via the hosted facilitator, stdlib only |
 | [`RECEIPTS.md`](RECEIPTS.md) | RECEIPTS v1: portable signed receipts, key pinning, disputes linked by `receipt_id` |
 | [`clients/python/minimalai_receipt.py`](clients/python/minimalai_receipt.py) | Offline receipt verifier (pinned key, no call to the issuer) |
 
@@ -54,6 +55,28 @@ console.log(await cli.chat({ model: 'any', messages: [{ role: 'user', content: '
 The wallet is a callback, so any TON wallet library works. The client pays on 402, retries until the transfer is on
 chain, keeps the returned key for the remaining credit and pays again when it runs out; `max_nano` caps one request.
 
+## Sell your API through the facilitator
+
+No chain code on your side: the hosted facilitator issues invoices to your own wallet and confirms payments on chain.
+Agents pay you directly; the facilitator never holds the money. Fee: max(0.001 GRAM, 0.5 %) per settled payment,
+taken from your facilitator key balance. Terms: `GET https://ai.minimalcult.org/v1/facilitator`; details in
+[`SPEC.md`](SPEC.md#facilitator-for-other-apis).
+
+```python
+from gram402_merchant import Merchant
+m = Merchant(api_key="mai-...", pay_to="UQ...your wallet")
+payment = request.headers.get("X-PAYMENT")
+if not payment:
+    return 402, m.invoice(amount_nano=50_000_000, resource="/my/endpoint")["x402"]
+s = m.settle(payment)
+if not s.get("success"):
+    return 402, {"error": s.get("invalidReason")}
+# serve the request; set header X-PAYMENT-RESPONSE to s["x_payment_response"]
+```
+
+A key comes from `POST https://ai.minimalcult.org/v1/agents/onboard`; top it up for fees with the returned
+`top_up` comment.
+
 ## Security
 
 - Transfer comments are public on chain, so the invoice id never settles alone: the private `secret` is required.
@@ -62,12 +85,13 @@ chain, keeps the returned key for the remaining credit and pays again when it ru
 - A request that fails after payment keeps the credit and returns its key.
 
 Tests for all of the above: `cd server && python3 test_app.py`, `python3 clients/python/test_gram402.py`,
+`python3 clients/python/test_gram402_merchant.py`,
 `clients/typescript/test.sh`.
 
 ## Status
 
-Draft v0.1. Integrated in the MINIMAL AI gateway code (Cocoon confidential inference on TON); public endpoints on
-TON testnet and mainnet are the next step. Also next: top-up of an
-existing account by comment, wallet-signed requests (TON Connect proof), packages on PyPI and npm.
+Draft v0.1. Running on TON mainnet in the MINIMAL AI gateway (`https://ai.minimalcult.org`, Cocoon confidential
+inference): paid chat requests, top-up of an existing account by comment, and the facilitator for other APIs.
+Next: wallet-signed requests (TON Connect proof), packages on PyPI and npm.
 
 Author: Aleksandr Shcherbakov ([@miinimal](https://github.com/miinimal)). License: MIT.

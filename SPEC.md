@@ -142,6 +142,23 @@ accepted marketplace tasks done with the wallet's accounts, and a level (`unknow
 Signed with the same Ed25519 key as receipts; verify the same way. `GET /v1/agents/{wallet}/badge.svg` renders it
 as a badge. Prompts, answers and per-request usage are never exposed.
 
+## Facilitator (for other APIs)
+
+Any API can accept GRAM-402 without running chain code: the facilitator at MINIMAL AI (`https://ai.minimalcult.org`) issues the invoice, finds the
+transfer and confirms it is genuine and unused. Payments go straight to the merchant's own wallet (no custody).
+
+1. Merchant gets a key (`POST /v1/agents/onboard`) and tops it up for fees.
+2. On an unpaid request, the merchant's server calls `POST /v1/facilitator/invoices {pay_to, amount_nano, resource}`
+   and replies HTTP 402 with the returned `x402` body. The transfer comment is `f402:<invoice>`.
+3. When the agent retries with `X-PAYMENT`, the server calls `POST /v1/facilitator/settle {payment: <header>}`;
+   on `success` it serves the request and returns `X-PAYMENT-RESPONSE` = `x_payment_response`.
+   `POST /v1/facilitator/verify` checks without consuming.
+
+Fee: max(0.001 GRAM, 0.5 %) per settled payment, reserved from the merchant's key when the invoice is created and
+released if the invoice expires unpaid (one grace hour after expiry for late confirmations). Terms:
+`GET /v1/facilitator`. A transaction settles at most one invoice; invoices are bound to the merchant key that made them.
+Merchant helper: [`clients/python/gram402_merchant.py`](clients/python/gram402_merchant.py).
+
 ## Next (v0.2)
 
 - top-up of an existing account: comment `mai:k:<account id>`, no new key;
