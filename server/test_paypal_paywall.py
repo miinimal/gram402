@@ -60,7 +60,41 @@ assert cl.delete(f"/v1/mandates/{m['mandate']}", headers={"X-Mandate-Secret": m[
 inv = cl.get("/v1/weather").json()["accepts"][0]["extra"]["invoice"]
 r = cl.get("/v1/weather", headers={"X-PAYMENT": pay(inv)})
 assert r.status_code == 402 and "revoked" in r.json()["error"]
-paypal402.MAX_NEW_PER_HOUR = 1
+# An invoice from a cheap path cannot pay for an expensive one (review finding: price and allowlist bypass).
+@api.get("/premium")
+def premium():
+    return {"premium": True}
+
+
+multi = TestClient(paypal_paywall(api, {"/v1/weather": 1, "/premium": 100}, tempfile.mktemp(suffix=".db")))
+mm = multi.post("/v1/mandates", json={"budget_cents": 500, "per_request_cents": 100, "days": 1,
+                                      "resources": ["/v1/weather"]}).json()
+multi.get(f"/v1/mandates/{mm['mandate']}/approved")
+cheap = multi.get("/v1/weather").json()["accepts"][0]["extra"]["invoice"]
+xp = base64.b64encode(json.dumps({"x402Version": 1, "scheme": "paypal-mandate", "payload": {
+    "mandate": mm["mandate"], "secret": mm["secret"], "invoice": cheap}}).encode()).decode()
+r = multi.get("/premium", headers={"X-PAYMENT": xp})
+assert r.status_code == 402 and "another resource" in r.json()["error"], r.text
+
+# Downstream 5xx after payment: refunded.
+@api.get("/boom")
+def boom():
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"error": "down"}, status_code=503)
+
+
+bc = TestClient(paypal_paywall(api, {"/boom": 3}, tempfile.mktemp(suffix=".db")))
+mb = bc.post("/v1/mandates", json={"budget_cents": 50, "per_request_cents": 5, "days": 1}).json()
+bc.get(f"/v1/mandates/{mb['mandate']}/approved")
+ib = bc.get("/boom").json()["accepts"][0]["extra"]["invoice"]
+n_ref = len(fake_paypal.STATE["refunds"])
+r = bc.get("/boom", headers={"X-PAYMENT": base64.b64encode(json.dumps({"x402Version": 1, "scheme": "paypal-mandate",
+           "payload": {"mandate": mb["mandate"], "secret": mb["secret"], "invoice": ib}}).encode()).decode()})
+assert r.status_code == 503 and len(fake_paypal.STATE["refunds"]) == n_ref + 1
+assert bc.get(f"/v1/mandates/{mb['mandate']}", headers={"X-Mandate-Secret": mb["secret"]}).json()["spent_cents"] == 0
+
+# Per-address limit on new mandates.
+paypal402.MAX_NEW_PER_IP_HOUR = 1
 r = cl.post("/v1/mandates", json={"budget_cents": 10, "per_request_cents": 5, "days": 1})
 assert r.status_code == 429, r.text
 

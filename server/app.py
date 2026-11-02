@@ -89,7 +89,8 @@ async def mandate_create(request: Request):
     try:
         with db() as c:
             return await paypal402.create_mandate(c, b.get("budget_cents", 500), b.get("per_request_cents", 25),
-                                                  b.get("days", 30), b.get("resources"))
+                                                  b.get("days", 30), b.get("resources"),
+                                                  ip=request.client.host if request.client else None)
     except paypal402.RateLimited as e:
         raise HTTPException(429, str(e))
 
@@ -240,15 +241,19 @@ async def chat(request: Request, authorization: str = Header(None)):
 async def chat_paypal(body, claim):
     """Pay-per-request from a PayPal mandate: capture first, then answer; the receipt binds the PayPal capture."""
     with db() as c:
-        st = await paypal402.settle(c, claim)
+        st = await paypal402.settle(c, claim, expect_resource="/v1/chat/completions",
+                                    expect_cents=paypal402.PRICE_CENTS)
     if not st["ok"]:
-        return JSONResponse({"x402Version": 1, "error": st["error"]}, status_code=402)
+        return JSONResponse({"x402Version": 1, "error": st["error"]}, status_code=402,
+                            headers={"Retry-After": "5"} if st.get("retry") else None)
     pay = {"network": st["network"], "transaction": st["transaction"], "payer": st["payer"], "charged_nano": None,
            "charged_cents": st["charged_cents"], "currency": paypal402.CURRENCY}
     try:
         resp = await answer(body)
     except HTTPException as e:
-        return JSONResponse({"error": {"message": e.detail}, "payment": pay}, status_code=e.status_code)
+        with db() as c:
+            rf = await paypal402.refund(c, st)
+        return JSONResponse({"error": {"message": e.detail}, "payment": pay, "refund": rf}, status_code=e.status_code)
     resp["gram402"] = {"charged_cents": st["charged_cents"], "mandate_left_cents": st["mandate_left_cents"],
                        "receipt": receipts.make(body, resp, "upstream" if UPSTREAM else "echo", None, pay),
                        "payment": pay}

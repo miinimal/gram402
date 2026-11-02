@@ -33,7 +33,15 @@ export class NearMandateClient {
     this.pollMs = opts.pollMs ?? 3_000;
   }
 
+  private safe(path: string): string {
+    // Paths may come from the model: never let them change the host the secret or payment goes to.
+    if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\')) throw new PaymentError('path must be an absolute path on the configured server');
+    if (new URL(this.base + path).host !== new URL(this.base).host) throw new PaymentError('path changes the host');
+    return path;
+  }
+
   async call(path: string, body: unknown): Promise<{ status: number; body: any }> {
+    path = this.safe(path);
     const post = (headers: Record<string, string>) => fetch(this.base + path, {
       method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
     let r = await post({});

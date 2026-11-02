@@ -64,9 +64,10 @@ def paypal_paywall(app, prices, db_path=None, gram=None, description=""):
             except ValueError:
                 return await reply(send, 400, {"error": "body must be JSON"})
             try:
+                client = scope.get("client") or (None,)
                 with db() as c:
                     m = await paypal402.create_mandate(c, b.get("budget_cents", 500), b.get("per_request_cents", 25),
-                                                       b.get("days", 30), b.get("resources"))
+                                                       b.get("days", 30), b.get("resources"), ip=client[0])
             except paypal402.RateLimited as e:
                 return await reply(send, 429, {"error": str(e)})
             return await reply(send, 200, m)
@@ -114,11 +115,15 @@ def paypal_paywall(app, prices, db_path=None, gram=None, description=""):
             if not accepts:
                 return await reply(send, 503, {"error": "payment service unavailable"})
             return await reply(send, 402, {"x402Version": 1, "error": "payment required", "accepts": accepts})
+        st = None
         if claim:
+            if not cents:
+                return await reply(send, 402, {"x402Version": 1, "error": "this path is not sold for PayPal"})
             with db() as c:
-                st = await paypal402.settle(c, claim)
+                st = await paypal402.settle(c, claim, expect_resource=path, expect_cents=int(cents))
             if not st["ok"]:
-                return await reply(send, 402, {"x402Version": 1, "error": st["error"]})
+                return await reply(send, 402, {"x402Version": 1, "error": st["error"]},
+                                   [(b"retry-after", b"5")] if st.get("retry") else [])
             hdr = paypal402.response_header(st).encode()
         elif gram is not None and nano:
             s = await asyncio.to_thread(gram.settle, xpay)
@@ -130,10 +135,21 @@ def paypal_paywall(app, prices, db_path=None, gram=None, description=""):
         else:
             return await reply(send, 402, {"x402Version": 1, "error": "unsupported payment scheme"})
 
+        status = {"code": 200}
+
         async def send2(msg):
             if msg["type"] == "http.response.start":
+                status["code"] = msg.get("status", 200)
                 msg = {**msg, "headers": [*msg.get("headers", []), (b"x-payment-response", hdr)]}
             await send(msg)
-        return await app(scope, receive, send2)
+        try:
+            await app(scope, receive, send2)
+        except Exception:
+            status["code"] = 500
+            raise
+        finally:
+            if st and status["code"] >= 500:  # paid but not served: give the money back
+                with db() as c:
+                    await paypal402.refund(c, st)
 
     return wrapped

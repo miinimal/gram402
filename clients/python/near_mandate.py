@@ -15,6 +15,7 @@ import base64
 import json
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 SCHEME = "near-mandate"
@@ -41,7 +42,16 @@ class NearMandateClient:
         except urllib.error.HTTPError as e:
             return e.code, dict(e.headers), json.loads(e.read() or b"{}")
 
+    def _safe(self, path):
+        """Paths come from the agent (possibly from the model): never let them change the host the secret goes to."""
+        if not isinstance(path, str) or not path.startswith("/") or path.startswith("//") or "\\" in path:
+            raise PaymentError("path must be an absolute path on the configured server")
+        if urllib.parse.urlsplit(self.base + path).netloc != urllib.parse.urlsplit(self.base).netloc:
+            raise PaymentError("path changes the host")
+        return path
+
     def call(self, path, body):
+        path = self._safe(path)
         st, hd, req = self._post(path, body)
         if st != 402:
             return st, req

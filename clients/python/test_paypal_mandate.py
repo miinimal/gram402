@@ -46,3 +46,10 @@ try:
 except PaymentError as e:
     assert "max_cents" in str(e)
 print("paypal mandate client OK")
+for bad in [".evil.com/x", "//evil.com/x", "http://evil.com/x", "@evil.com/x"]:
+    try:
+        agent.call(bad, {})
+        raise AssertionError("host change allowed: " + bad)
+    except PaymentError:
+        pass
+print("paypal mandate client: host guard OK")

@@ -74,7 +74,7 @@ assert r.status_code == 402 and STATE["orders"] == 1
 inv2 = invoice()
 STATE["fail_next"] = True
 r = cl.post("/v1/chat/completions", json=REQ, headers={"X-PAYMENT": xpay(m["mandate"], m["secret"], inv2)})
-assert r.status_code == 402 and "PayPal payment failed" in r.json()["error"]
+assert r.status_code == 402 and "PayPal refused" in r.json()["error"]
 st = cl.get(f"/v1/mandates/{m['mandate']}", headers={"X-Mandate-Secret": m["secret"]}).json()
 assert st["spent_cents"] == 10, st
 r = cl.post("/v1/chat/completions", json=REQ, headers={"X-PAYMENT": xpay(m["mandate"], m["secret"], inv2)})
@@ -94,7 +94,7 @@ assert r.status_code == 402 and "per-request cap" in r.json()["error"]
 with A.db() as c:
     c.execute("UPDATE pp_invoices SET resource='/v1/other' WHERE id=?", (inv3,))
 r = cl.post("/v1/chat/completions", json=REQ, headers={"X-PAYMENT": xpay(m["mandate"], m["secret"], inv3)})
-assert r.status_code == 402 and "not allowed" in r.json()["error"]
+assert r.status_code == 402 and ("not allowed" in r.json()["error"] or "another resource" in r.json()["error"])
 
 # 10. Revoke stops spending; the status endpoint needs the secret.
 assert cl.get(f"/v1/mandates/{m2['mandate']}").status_code == 404
@@ -107,6 +107,41 @@ assert r.status_code == 402 and "revoked" in r.json()["error"]
 with A.db() as c:
     row = c.execute("SELECT * FROM pp_mandates WHERE id=?", (m["mandate"],)).fetchone()
     assert row["secret_hash"] != m["secret"] and m["secret"] not in json.dumps(dict(row))
+
+# 13. PayPal 5xx after capturing: reservation kept, retry with the same X-PAYMENT finishes it, charged once.
+m5 = cl.post("/v1/mandates", json={"budget_cents": 50, "per_request_cents": 10, "days": 1}).json()
+cl.get(f"/v1/mandates/{m5['mandate']}/approved")
+inv5 = invoice()
+STATE["error_next"] = True
+r = cl.post("/v1/chat/completions", json=REQ, headers={"X-PAYMENT": xpay(m5["mandate"], m5["secret"], inv5)})
+assert r.status_code == 402 and r.headers.get("retry-after") == "5" and "unknown" in r.json()["error"], r.text
+assert cl.get(f"/v1/mandates/{m5['mandate']}", headers={"X-Mandate-Secret": m5["secret"]}).json()["spent_cents"] == 10
+orders_before = STATE["orders"]
+r = cl.post("/v1/chat/completions", json=REQ, headers={"X-PAYMENT": xpay(m5["mandate"], m5["secret"], inv5)})
+assert r.status_code == 200 and STATE["orders"] == orders_before, r.text
+assert cl.get(f"/v1/mandates/{m5['mandate']}", headers={"X-Mandate-Secret": m5["secret"]}).json()["spent_cents"] == 10
+
+# 14. Another mandate cannot take over an invoice that is mid-payment.
+m6 = cl.post("/v1/mandates", json={"budget_cents": 50, "per_request_cents": 10, "days": 1}).json()
+cl.get(f"/v1/mandates/{m6['mandate']}/approved")
+inv6 = invoice()
+STATE["error_next"] = True
+cl.post("/v1/chat/completions", json=REQ, headers={"X-PAYMENT": xpay(m5["mandate"], m5["secret"], inv6)})
+r = cl.post("/v1/chat/completions", json=REQ, headers={"X-PAYMENT": xpay(m6["mandate"], m6["secret"], inv6)})
+assert r.status_code == 402 and "already used" in r.json()["error"]
+
+# 15. Paid but the answer failed: refunded and the budget given back.
+inv7 = invoice()
+real_answer = A.answer
+
+
+async def broken(body):
+    raise A.HTTPException(502, "upstream down")
+A.answer = broken
+r = cl.post("/v1/chat/completions", json=REQ, headers={"X-PAYMENT": xpay(m6["mandate"], m6["secret"], inv7)})
+A.answer = real_answer
+assert r.status_code == 502 and r.json()["refund"]["refunded"] and STATE["refunds"], r.text
+assert cl.get(f"/v1/mandates/{m6['mandate']}", headers={"X-Mandate-Secret": m6["secret"]}).json()["spent_cents"] == 0
 
 # 12. Owner page and browser-facing approval result.
 r = cl.get("/mandates")

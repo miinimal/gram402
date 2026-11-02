@@ -39,10 +39,15 @@ CURRENCY = ENV("PAYPAL_CURRENCY", "USD")
 TTL = int(ENV("PAY402_TTL_S", "1800"))
 SCHEME = "paypal-mandate"
 MAX_BUDGET_CENTS = int(ENV("PAYPAL_MAX_BUDGET_CENTS", "50000"))
-MAX_NEW_PER_HOUR = int(ENV("PAYPAL_MAX_NEW_MANDATES_PER_HOUR", "60"))  # abuse guard: setup tokens cost PayPal calls
+MAX_NEW_PER_HOUR = int(ENV("PAYPAL_MAX_NEW_MANDATES_PER_HOUR", "300"))  # abuse guard: setup tokens cost PayPal calls
+MAX_NEW_PER_IP_HOUR = int(ENV("PAYPAL_MAX_NEW_MANDATES_PER_IP_HOUR", "10"))
 
 class RateLimited(Exception):
     pass
+
+
+class Declined(Exception):
+    """PayPal answered 4xx: the request was refused, nothing was charged."""
 
 
 _transport = None  # tests inject httpx.MockTransport
@@ -69,10 +74,14 @@ def setup_db(c):
     c.executescript("""
     CREATE TABLE IF NOT EXISTS pp_mandates(id TEXT PRIMARY KEY, secret_hash TEXT NOT NULL, created INTEGER,
         expires INTEGER, budget_cents INTEGER, per_request_cents INTEGER, spent_cents INTEGER NOT NULL DEFAULT 0,
-        resources TEXT, status TEXT NOT NULL DEFAULT 'pending', setup_token TEXT, vault_id TEXT, payer TEXT);
+        resources TEXT, status TEXT NOT NULL DEFAULT 'pending', setup_token TEXT, vault_id TEXT, payer TEXT, ip TEXT);
     CREATE TABLE IF NOT EXISTS pp_invoices(id TEXT PRIMARY KEY, mandate TEXT, created INTEGER, expires INTEGER,
         amount_cents INTEGER, resource TEXT, status TEXT NOT NULL DEFAULT 'open', capture_id TEXT);
     """)
+    try:  # databases created before the per-IP limit
+        c.execute("ALTER TABLE pp_mandates ADD COLUMN ip TEXT")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _client():
@@ -95,17 +104,23 @@ async def _call(method, path, body=None, request_id=None):
         if request_id:
             headers["PayPal-Request-Id"] = request_id
         r = await cl.request(method, path, json=body, headers=headers)
-        if r.status_code >= 400:
+        if 400 <= r.status_code < 500:
+            raise Declined(f"paypal {path} {r.status_code}: {r.text[:300]}")
+        if r.status_code >= 500:
             raise RuntimeError(f"paypal {path} {r.status_code}: {r.text[:300]}")
         return r.json() if r.content else {}
 
 
-async def create_mandate(c, budget_cents, per_request_cents, days, resources=None, now=None):
+async def create_mandate(c, budget_cents, per_request_cents, days, resources=None, now=None, ip=None):
     """Create a pending mandate and a PayPal setup token; returns the secret once and the approval link."""
     now = now or int(time.time())
+    c.execute("DELETE FROM pp_mandates WHERE status='pending' AND created<?", (now - 86400,))  # never approved
     recent = c.execute("SELECT count(*) FROM pp_mandates WHERE created>?", (now - 3600,)).fetchone()[0]
     if recent >= MAX_NEW_PER_HOUR:
         raise RateLimited("too many new mandates in the last hour; try again later")
+    if ip and c.execute("SELECT count(*) FROM pp_mandates WHERE ip=? AND created>?",
+                        (ip, now - 3600)).fetchone()[0] >= MAX_NEW_PER_IP_HOUR:
+        raise RateLimited("too many new mandates from this address in the last hour; try again later")
     budget_cents = max(1, min(int(budget_cents), MAX_BUDGET_CENTS))
     per_request_cents = max(1, min(int(per_request_cents), budget_cents))
     mid, sec = "m_" + secrets.token_hex(8), secrets.token_urlsafe(24)
@@ -118,9 +133,9 @@ async def create_mandate(c, budget_cents, per_request_cents, days, resources=Non
         request_id="setup-" + mid)
     approve = next((l["href"] for l in st.get("links", []) if l.get("rel") == "approve"), None)
     c.execute("INSERT INTO pp_mandates(id,secret_hash,created,expires,budget_cents,per_request_cents,resources,"
-              "setup_token) VALUES(?,?,?,?,?,?,?,?)",
+              "setup_token,ip) VALUES(?,?,?,?,?,?,?,?,?)",
               (mid, _h(sec), now, now + int(days) * 86400, budget_cents, per_request_cents,
-               json.dumps(resources or []), st["id"]))
+               json.dumps(resources or []), st["id"], ip))
     return {"mandate": mid, "secret": sec, "approve_url": approve, "budget_cents": budget_cents,
             "per_request_cents": per_request_cents, "expires": now + int(days) * 86400, "currency": CURRENCY}
 
@@ -195,70 +210,102 @@ def parse_header(value):
     return {"mandate": str(p["mandate"])[:40], "secret": str(p["secret"])[:128], "invoice": str(p["invoice"])[:40]}
 
 
-def _check(c, claim, now):
+def _check(c, claim, now, expect_resource=None, expect_cents=None):
+    """Returns (mandate, invoice, resume, error). resume=True: this mandate already reserved this invoice and the
+    PayPal outcome is unknown (timeout/5xx/pending); the same idempotency keys finish it without a new reservation."""
     m = c.execute("SELECT * FROM pp_mandates WHERE id=?", (claim["mandate"],)).fetchone()
     if not m or not secrets.compare_digest(m["secret_hash"], _h(claim["secret"])):
-        return None, None, "unknown mandate or wrong secret"
+        return None, None, False, "unknown mandate or wrong secret"
     if m["status"] != "active":
-        return None, None, "mandate is " + m["status"] + ("; the owner must approve it first" if m["status"] == "pending" else "")
-    if now > m["expires"]:
-        return None, None, "mandate expired"
+        return None, None, False, "mandate is " + m["status"] + ("; the owner must approve it first" if m["status"] == "pending" else "")
     inv = c.execute("SELECT * FROM pp_invoices WHERE id=?", (claim["invoice"],)).fetchone()
-    if not inv or inv["status"] != "open":
-        return None, None, "unknown or already used invoice"
+    if not inv:
+        return None, None, False, "unknown or already used invoice"
+    if expect_resource is not None and (inv["resource"] != expect_resource or
+                                        (expect_cents is not None and inv["amount_cents"] != int(expect_cents))):
+        return None, None, False, "invoice is for another resource or price"
+    if inv["status"] == "paying" and inv["mandate"] == m["id"]:
+        return m, inv, True, None
+    if inv["status"] != "open":
+        return None, None, False, "unknown or already used invoice"
+    if now > m["expires"]:
+        return None, None, False, "mandate expired"
     if now > inv["expires"]:
-        return None, None, "invoice expired"
+        return None, None, False, "invoice expired"
     allowed = json.loads(m["resources"] or "[]")
     if allowed and inv["resource"] not in allowed:
-        return None, None, "resource not allowed by this mandate"
+        return None, None, False, "resource not allowed by this mandate"
     if inv["amount_cents"] > m["per_request_cents"]:
-        return None, None, "price exceeds the mandate's per-request cap"
+        return None, None, False, "price exceeds the mandate's per-request cap"
     if m["spent_cents"] + inv["amount_cents"] > m["budget_cents"]:
-        return None, None, "mandate budget exhausted"
-    return m, inv, None
+        return None, None, False, "mandate budget exhausted"
+    return m, inv, False, None
 
 
-async def settle(c, claim, now=None):
-    """Check limits, reserve the amount, capture on PayPal; on failure release the reservation."""
+async def settle(c, claim, now=None, expect_resource=None, expect_cents=None):
+    """Check limits, reserve the amount, capture on PayPal.
+    - PayPal refuses (4xx): the reservation is released, nothing was charged.
+    - outcome unknown (timeout, 5xx, capture pending): the invoice stays reserved for this mandate; retrying the same
+      X-PAYMENT repeats the calls with the same idempotency keys, so PayPal never charges twice.
+    `expect_resource`/`expect_cents` bind the invoice to the endpoint and price being served."""
     now = now or int(time.time())
-    m, inv, err = _check(c, claim, now)
+    m, inv, resume, err = _check(c, claim, now, expect_resource, expect_cents)
     if err:
         return {"ok": False, "error": err}
-    cur = c.execute("UPDATE pp_mandates SET spent_cents=spent_cents+? WHERE id=? AND spent_cents+?<=budget_cents",
-                    (inv["amount_cents"], m["id"], inv["amount_cents"]))
-    cur2 = c.execute("UPDATE pp_invoices SET status='paying', mandate=? WHERE id=? AND status='open'",
-                     (m["id"], inv["id"]))
-    if cur.rowcount != 1 or cur2.rowcount != 1:
-        c.rollback()
-        return {"ok": False, "error": "concurrent payment; retry"}
-    c.commit()
+    if not resume:
+        cur = c.execute("UPDATE pp_mandates SET spent_cents=spent_cents+? WHERE id=? AND spent_cents+?<=budget_cents",
+                        (inv["amount_cents"], m["id"], inv["amount_cents"]))
+        cur2 = c.execute("UPDATE pp_invoices SET status='paying', mandate=? WHERE id=? AND status='open'",
+                         (m["id"], inv["id"]))
+        if cur.rowcount != 1 or cur2.rowcount != 1:
+            c.rollback()
+            return {"ok": False, "error": "concurrent payment; retry"}
+        c.commit()
+    key = f"{inv['id']}-{m['id']}"
     try:
         order = await _call("POST", "/v2/checkout/orders", {
             "intent": "CAPTURE",
             "purchase_units": [{"amount": {"currency_code": CURRENCY, "value": _money(inv["amount_cents"])},
-                                "invoice_id": inv["id"], "custom_id": m["id"],
+                                "invoice_id": key, "custom_id": m["id"],
                                 "description": ("AI request " + inv["resource"])[:127]}],
             "payment_source": {"paypal": {"vault_id": m["vault_id"],
                                           "stored_credential": {"payment_initiator": "MERCHANT",
                                                                 "usage": "SUBSEQUENT",
                                                                 "usage_pattern": "UNSCHEDULED_POSTPAID"}}}},
-            request_id="order-" + inv["id"])
+            request_id="order-" + key)
         if order.get("status") != "COMPLETED":
-            order = await _call("POST", f"/v2/checkout/orders/{order['id']}/capture", {},
-                                request_id="capture-" + inv["id"])
+            order = await _call("POST", f"/v2/checkout/orders/{order['id']}/capture", {}, request_id="capture-" + key)
         cap = order["purchase_units"][0]["payments"]["captures"][0]
-        if order.get("status") != "COMPLETED" or cap.get("status") not in ("COMPLETED", "PENDING"):
-            raise RuntimeError("capture status " + str(cap.get("status")))
-    except Exception as e:  # noqa: BLE001
+    except Declined as e:
         c.execute("UPDATE pp_mandates SET spent_cents=spent_cents-? WHERE id=?", (inv["amount_cents"], m["id"]))
-        c.execute("UPDATE pp_invoices SET status='open' WHERE id=?", (inv["id"],))
+        c.execute("UPDATE pp_invoices SET status='open', mandate=NULL WHERE id=?", (inv["id"],))
         c.commit()
-        return {"ok": False, "error": "PayPal payment failed: " + str(e)[:200]}
+        return {"ok": False, "error": "PayPal refused the payment: " + str(e)[:200]}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "retry": True, "error": "PayPal outcome unknown, nothing released; repeat the same request "
+                                                   "to finish the payment (" + str(e)[:120] + ")"}
+    if order.get("status") != "COMPLETED" or cap.get("status") != "COMPLETED":
+        return {"ok": False, "retry": True, "error": "PayPal capture is " + str(cap.get("status")) + "; repeat later"}
     c.execute("UPDATE pp_invoices SET status='paid', capture_id=? WHERE id=?", (cap["id"], inv["id"]))
     c.commit()
-    left = m["budget_cents"] - m["spent_cents"] - inv["amount_cents"]
-    return {"ok": True, "network": network_id(), "transaction": cap["id"], "payer": m["id"],
-            "charged_cents": inv["amount_cents"], "mandate_left_cents": left}
+    spent = c.execute("SELECT spent_cents FROM pp_mandates WHERE id=?", (m["id"],)).fetchone()[0]
+    return {"ok": True, "network": network_id(), "transaction": cap["id"], "payer": m["id"], "invoice": inv["id"],
+            "charged_cents": inv["amount_cents"], "mandate_left_cents": m["budget_cents"] - spent}
+
+
+async def refund(c, st):
+    """The answer could not be delivered after payment: refund the capture and give the budget back."""
+    try:
+        await _call("POST", f"/v2/payments/captures/{st['transaction']}/refund", {},
+                    request_id="refund-" + st["transaction"])
+    except Exception as e:  # noqa: BLE001
+        c.execute("UPDATE pp_invoices SET status='refund_failed' WHERE capture_id=?", (st["transaction"],))
+        c.commit()
+        return {"refunded": False, "error": str(e)[:200]}
+    c.execute("UPDATE pp_mandates SET spent_cents=spent_cents-? WHERE id=?", (st["charged_cents"], st["payer"]))
+    c.execute("UPDATE pp_invoices SET status='refunded' WHERE capture_id=?", (st["transaction"],))
+    c.commit()
+    return {"refunded": True}
 
 
 def response_header(s):
