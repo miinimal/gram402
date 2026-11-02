@@ -52,6 +52,46 @@ def setup_db(c):
         paid_nano INTEGER, key_hash TEXT);
     CREATE TABLE IF NOT EXISTS pay_txs(tx_hash TEXT PRIMARY KEY, invoice TEXT, ts INTEGER);
     """)
+    try:  # api_key sealed with the invoice secret: a retried claim gets the same key back (idempotent settlement)
+        c.execute("ALTER TABLE pay_invoices ADD COLUMN key_enc TEXT")
+    except Exception:  # noqa: BLE001 - column exists
+        pass
+
+
+def _stream(secret, n):
+    out, i = b"", 0
+    while len(out) < n:
+        out += hashlib.sha256(f"gram402-key:{i}:{secret}".encode()).digest(); i += 1
+    return out[:n]
+
+
+def seal_key(secret, api_key):
+    """Only the holder of the invoice secret (the agent) can open it; the gateway keeps only sha256(secret)."""
+    b = api_key.encode()
+    return base64.b64encode(bytes(x ^ y for x, y in zip(b, _stream(secret, len(b))))).decode()
+
+
+def open_key(secret, sealed):
+    b = base64.b64decode(sealed)
+    return bytes(x ^ y for x, y in zip(b, _stream(secret, len(b)))).decode()
+
+
+def _replay(c, claim):
+    """Same claim again (lost response, timeout, parallel retry): return the first settlement, credit nothing new."""
+    row = c.execute("SELECT * FROM pay_invoices WHERE id=?", (claim["invoice"],)).fetchone()
+    if not row or not row["key_enc"]:
+        return None
+    try:
+        api_key = open_key(claim["secret"], row["key_enc"])
+    except Exception:  # noqa: BLE001
+        return None
+    if row["status"] == "underpaid":
+        return {"ok": False, "underpaid": True, "replay": True, "api_key": api_key, "credit_nano": row["paid_nano"],
+                "tx_hash": row["tx_hash"], "payer": row["payer"],
+                "error": f"underpaid: received {row['paid_nano']} nanoGRAM, the invoice needs {int(row['amount_nano'])}. "
+                         "What arrived is credited to an account for your wallet: use api_key as Bearer, or request a new invoice."}
+    return {"ok": True, "replay": True, "api_key": api_key, "key_hash": row["key_hash"], "tx_hash": row["tx_hash"],
+            "payer": row["payer"], "paid_nano": row["paid_nano"], "network": network_id()}
 
 
 def quote_nano(body, cost_fn, markup):
@@ -134,8 +174,8 @@ def settle(c, claim, txs, new_key_fn, now=None):
     row = c.execute("SELECT * FROM pay_invoices WHERE id=?", (claim["invoice"],)).fetchone()
     if not row or not secrets.compare_digest(row["secret_hash"], _h(claim["secret"])):
         return {"ok": False, "error": "unknown invoice or wrong secret"}
-    if row["status"] == "paid":
-        return {"ok": False, "error": "invoice already settled; use the api_key returned with the first settlement"}
+    if row["status"] in ("paid", "underpaid"):
+        return _replay(c, claim) or {"ok": False, "error": "invoice already settled; use the api_key returned with the first settlement"}
     short = []
     found = find_payment(txs, claim["invoice"], int(row["amount_nano"]), short)
     if not found and short:
@@ -146,13 +186,13 @@ def settle(c, claim, txs, new_key_fn, now=None):
                 c.execute("UPDATE pay_invoices SET status='underpaid' WHERE id=? AND status='open'", (claim["invoice"],)).rowcount == 1:
             c.execute("INSERT INTO pay_txs VALUES(?,?,?)", (tx_hash, claim["invoice"], now))
             api_key, key_hash = new_key_fn(c, payer, value, tx_hash)
-            c.execute("UPDATE pay_invoices SET tx_hash=?, payer=?, paid_nano=?, key_hash=? WHERE id=?",
-                      (tx_hash, payer, value, key_hash, claim["invoice"]))
+            c.execute("UPDATE pay_invoices SET tx_hash=?, payer=?, paid_nano=?, key_hash=?, key_enc=? WHERE id=?",
+                      (tx_hash, payer, value, key_hash, seal_key(claim["secret"], api_key), claim["invoice"]))
             return {"ok": False, "underpaid": True, "error": f"underpaid: received {value} nanoGRAM, the invoice needs "
                     f"{int(row['amount_nano'])}. Send transfers with the network fee paid separately (send mode 1). What "
                     "arrived is credited to an account for your wallet: use api_key as Bearer, or request a new invoice.",
                     "api_key": api_key, "credit_nano": value, "tx_hash": tx_hash, "payer": payer}
-        return {"ok": False, "error": "invoice closed as underpaid; the amount was credited to the api_key returned then"}
+        return _replay(c, claim) or {"ok": False, "error": "invoice closed as underpaid; the amount was credited to the api_key returned then"}
     if row["status"] == "underpaid":
         return {"ok": False, "error": "invoice closed as underpaid; the amount was credited to the api_key returned then"}
     if not found:
@@ -160,15 +200,18 @@ def settle(c, claim, txs, new_key_fn, now=None):
             return {"ok": False, "error": "invoice expired and no payment found", "expired": True}
         return {"ok": False, "error": "payment not found on chain yet; retry in a few seconds", "retry": True}
     tx_hash, payer, value = found
-    if c.execute("SELECT 1 FROM pay_txs WHERE tx_hash=?", (tx_hash,)).fetchone():
+    used = c.execute("SELECT invoice FROM pay_txs WHERE tx_hash=?", (tx_hash,)).fetchone()
+    if used:
+        if used[0] == claim["invoice"]:
+            return _replay(c, claim) or {"ok": False, "error": "invoice already settled"}
         return {"ok": False, "error": "this transaction already settled another invoice"}
     cur = c.execute("UPDATE pay_invoices SET status='paid' WHERE id=? AND status='open'", (claim["invoice"],))
-    if cur.rowcount != 1:
-        return {"ok": False, "error": "invoice already settled"}
+    if cur.rowcount != 1:  # a parallel claim won the race: hand back its settlement
+        return _replay(c, claim) or {"ok": False, "error": "invoice already settled"}
     c.execute("INSERT INTO pay_txs VALUES(?,?,?)", (tx_hash, claim["invoice"], now))
     api_key, key_hash = new_key_fn(c, payer, value, tx_hash)
-    c.execute("UPDATE pay_invoices SET tx_hash=?, payer=?, paid_nano=?, key_hash=? WHERE id=?",
-              (tx_hash, payer, value, key_hash, claim["invoice"]))
+    c.execute("UPDATE pay_invoices SET tx_hash=?, payer=?, paid_nano=?, key_hash=?, key_enc=? WHERE id=?",
+              (tx_hash, payer, value, key_hash, seal_key(claim["secret"], api_key), claim["invoice"]))
     return {"ok": True, "api_key": api_key, "key_hash": key_hash, "tx_hash": tx_hash, "payer": payer,
             "paid_nano": value, "network": network_id()}
 
@@ -176,5 +219,6 @@ def settle(c, claim, txs, new_key_fn, now=None):
 def response_header(settlement, charged_nano, balance_nano):
     d = {"success": True, "scheme": SCHEME, "network": settlement["network"], "transaction": settlement["tx_hash"],
          "payer": settlement["payer"], "paid_nano": settlement["paid_nano"], "charged_nano": charged_nano,
-         "credit_left_nano": balance_nano, "api_key": settlement["api_key"]}
+         "credit_left_nano": balance_nano, "api_key": settlement["api_key"],
+         **({"replay": True} if settlement.get("replay") else {})}
     return base64.b64encode(json.dumps(d, separators=(",", ":")).encode()).decode()

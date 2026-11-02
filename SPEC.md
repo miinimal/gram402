@@ -89,7 +89,7 @@ Plain JSON is accepted too. Server answers:
 |---|---|
 | 200 | settled and answered; `X-PAYMENT-RESPONSE` and the response's payment block carry the settlement |
 | 402 + `Retry-After: 5` | transfer not visible on chain yet; repeat the same request |
-| 402 | wrong secret, expired, underpaid, invoice already settled, or the transaction already settled another invoice |
+| 402 | wrong secret, expired, underpaid, or the transaction already settled another invoice |
 | 4xx/5xx + payment block | settled, but the request itself failed; credit is kept, use the returned `api_key` |
 
 ## Settlement (X-PAYMENT-RESPONSE)
@@ -107,6 +107,11 @@ Plain JSON is accepted too. Server answers:
 1. The comment is public on chain, so the invoice id never settles alone: the secret is required. This blocks
    front-running by observers of the chain.
 2. A transaction hash settles at most one invoice; an invoice settles once (atomic status change).
+2a. Settlement is idempotent. Repeating the same `X-PAYMENT` (lost response, timeout, two workers retrying at once)
+   returns the first settlement: the same transaction, payer and `api_key`, marked `replay: true` in
+   `X-PAYMENT-RESPONSE`. Nothing is credited twice; the repeated request is served from the credit already paid. For an
+   underpaid invoice the retry returns the same credited key. The server stores the key sealed with the invoice secret,
+   which only the payer holds, and keeps only the secret's SHA-256.
 3. Aborted or failed incoming transactions are ignored.
 4. Only transfers to `payTo` with the exact comment and at least the quoted amount count.
 5. A failed request after settlement never loses the payment: the credit and its key are returned with the error.

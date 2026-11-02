@@ -62,8 +62,13 @@ def main():
     r = c.post("/v1/chat/completions", json=REQ, headers={"Authorization": "Bearer " + g["payment"]["api_key"]})
     assert r.status_code == 200                                                    # credit reused, no new payment
 
+    keys0 = A.db().execute("SELECT count(*) FROM keys").fetchone()[0] if hasattr(A, "db") else None
     r = c.post("/v1/chat/completions", json=REQ, headers={"X-PAYMENT": xpay(inv, sec)})
-    assert r.status_code == 402 and "already settled" in r.json()["error"]         # invoice settles once
+    assert r.status_code == 200, r.text                                            # retry of a paid claim: idempotent
+    assert r.json()["gram402"]["payment"]["api_key"] == g["payment"]["api_key"]   # same key, nothing credited twice
+    assert r.json()["gram402"]["payment"]["transaction"] == "tx1"
+    if keys0 is not None:
+        assert A.db().execute("SELECT count(*) FROM keys").fetchone()[0] == keys0
 
     r2 = c.post("/v1/chat/completions", json=REQ).json()["accepts"][0]["extra"]
     CHAIN.append(tx("tx1", "mai:" + r2["invoice"], amount * 3))
@@ -75,8 +80,11 @@ def main():
     r = c.post("/v1/chat/completions", json=REQ, headers={"X-PAYMENT": xpay(r3["invoice"], r3["secret"])})
     assert r.status_code == 402 and r.json()["error"].startswith("underpaid")      # underpayment does not settle...
     assert r.json()["underpaid"]["credit_nano"] == 1                               # ...but is credited, not lost
+    k_under = r.json()["underpaid"]["api_key"]
+    n_keys = A.db().execute("SELECT count(*) FROM keys").fetchone()[0]
     r = c.post("/v1/chat/completions", json=REQ, headers={"X-PAYMENT": xpay(r3["invoice"], r3["secret"])})
-    assert "closed as underpaid" in r.json()["error"]                              # credited once
+    assert r.status_code == 402 and r.json()["underpaid"]["api_key"] == k_under    # retry: same key back...
+    assert A.db().execute("SELECT count(*) FROM keys").fetchone()[0] == n_keys     # ...credited once
     print("gram402 server OK")
 
 
