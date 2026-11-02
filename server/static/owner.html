@@ -12,6 +12,7 @@
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0b131b;--card:#121d28;--fg:#e6eef5;--muted:#91a3b4;--line:#22313f;--accent:#4aa3ff;--accent-ink:#06121e;--ok:#4cc382;--warn:#ff8a72;--meter:#1d2b38;color-scheme:dark}}
 :root[data-theme="dark"]{--bg:#0b131b;--card:#121d28;--fg:#e6eef5;--muted:#91a3b4;--line:#22313f;--accent:#4aa3ff;--accent-ink:#06121e;--ok:#4cc382;--warn:#ff8a72;--meter:#1d2b38;color-scheme:dark}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 var(--display)}
 main{max-width:560px;margin:0 auto;padding-block:32px 56px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:18px}
 h1{font-size:28px;font-weight:800;margin:0;letter-spacing:-.01em;text-wrap:balance}
@@ -33,6 +34,12 @@ button.ghost{background:transparent;color:var(--warn);border:1px solid var(--war
 .s-active{color:var(--ok)}.s-pending{color:var(--muted)}.s-revoked,.s-expired{color:var(--warn)}
 .note{font-size:13px;color:var(--muted);margin:0}
 .err{color:var(--warn);font-size:14px;margin:0}
+.pay{width:100%;border-collapse:collapse;font-size:13px}
+.pay td{padding:7px 0;border-top:1px solid var(--line);vertical-align:top}
+.pay td:nth-child(2){text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap;padding-left:10px}
+.pay .cap{font-family:var(--mono);font-size:12px;color:var(--muted);word-break:break-all}
+.pay .ref{color:var(--warn)}
+#wait{display:flex;align-items:center;gap:8px}
 @media (prefers-reduced-motion:reduce){.meter>i{transition:none}}
 </style>
 </head>
@@ -61,6 +68,7 @@ button.ghost{background:transparent;color:var(--warn);border:1px solid var(--war
     <div><div class="note">Secret</div><div class="mono" id="msec"></div></div>
     <button id="copy" type="button">Copy both</button>
     <a class="btn" id="approve" href="#" target="_blank" rel="noopener">Approve on PayPal</a>
+    <p class="note" id="wait" role="status" aria-live="polite"></p>
   </section>
 
   <section id="look">
@@ -74,6 +82,8 @@ button.ghost{background:transparent;color:var(--warn);border:1px solid var(--war
       <div class="meter" aria-hidden="true"><i id="bar"></i></div>
       <div class="figs"><span id="spent"></span><span id="left"></span></div>
       <p class="note" id="cap2"></p>
+      <table class="pay" id="pays" hidden><tbody id="paysb"></tbody></table>
+      <p class="note" id="nopay" hidden>No payments yet.</p>
       <button class="ghost" id="revoke" type="button">Revoke now</button>
     </div>
   </section>
@@ -99,13 +109,38 @@ $("make").onclick=async()=>{
   try{
     const m=await api("POST","/v1/mandates",{budget_cents:b,per_request_cents:p,days:d});
     $("mid").textContent=m.mandate;$("msec").textContent=m.secret;$("approve").href=m.approve_url;
-    $("qid").value=m.mandate;$("made").hidden=false;
+    $("qid").value=m.mandate;$("qsec").value=m.secret;$("made").hidden=false;waitApproval(m.mandate,m.secret);
   }catch(e){err($("cerr"),"Could not create the mandate: "+e.message)}
 };
 $("copy").onclick=()=>{
   const t="MANDATE_ID="+$("mid").textContent+"\nMANDATE_SECRET="+$("msec").textContent;
   try{navigator.clipboard.writeText(t).then(()=>{$("copy").textContent="Copied"},()=>{$("copy").textContent="Select and copy manually"})}catch(e){$("copy").textContent="Select and copy manually"}
 };
+let waiting=0;
+async function waitApproval(id,secret){
+  const run=++waiting;$("wait").textContent="Waiting for your approval on PayPal…";
+  const until=Date.now()+20*60*1000;
+  while(run===waiting&&Date.now()<until){
+    await new Promise(r=>setTimeout(r,6000));
+    try{const s=await api("GET","/v1/mandates/"+encodeURIComponent(id),null,secret);
+      if(s.status==="active"){$("wait").textContent="Approved. Your agent can pay within these limits now.";show();return}
+      if(s.status!=="pending"){$("wait").textContent="Mandate is "+s.status+".";return}
+    }catch(e){}
+  }
+  if(run===waiting)$("wait").textContent="Still not approved. Open the PayPal link again, or check the mandate below later.";
+}
+function payments(list){
+  const b=$("paysb");b.replaceChildren();
+  for(const p of list){
+    const tr=document.createElement("tr"),a=document.createElement("td"),c=document.createElement("td");
+    const t=document.createElement("div");t.textContent=(p.at?new Date(p.at*1000).toLocaleString()+" · ":"")+p.resource;
+    const k=document.createElement("div");k.className="cap";k.textContent="PayPal capture "+(p.capture||"—");
+    a.append(t,k);
+    c.textContent=(p.status==="paid"?"":"↩ ")+usd(p.cents);if(p.status!=="paid"){c.className="ref";c.title="refunded"}
+    tr.append(a,c);b.append(tr);
+  }
+  $("pays").hidden=!list.length;$("nopay").hidden=!!list.length;
+}
 async function show(){
   err($("lerr"),"");
   try{
@@ -116,6 +151,7 @@ async function show(){
     $("spent").textContent="spent "+usd(s.spent_cents)+" of "+usd(s.budget_cents);
     $("left").textContent=usd(s.left_cents)+" left";
     $("cap2").textContent="Up to "+usd(s.per_request_cents)+" per request"+(s.resources.length?" · only "+s.resources.join(", "):"");
+    payments(s.payments||[]);
     $("revoke").hidden=s.status!=="active"&&s.status!=="pending";$("card").hidden=false;
   }catch(e){$("card").hidden=true;err($("lerr"),"Not found. Check the mandate id and the secret.")}
 }

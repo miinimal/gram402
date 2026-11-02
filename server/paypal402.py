@@ -172,7 +172,13 @@ def status(c, mid, secret):
     return {"mandate": mid, "status": row["status"], "budget_cents": row["budget_cents"],
             "spent_cents": row["spent_cents"], "left_cents": row["budget_cents"] - row["spent_cents"],
             "per_request_cents": row["per_request_cents"], "expires": row["expires"],
-            "resources": json.loads(row["resources"] or "[]"), "currency": CURRENCY}
+            "resources": json.loads(row["resources"] or "[]"), "currency": CURRENCY,
+            "payments": [{"invoice": r["id"], "cents": r["amount_cents"], "resource": r["resource"],
+                          "status": r["status"], "capture": r["capture_id"], "at": r["paying_since"]}
+                         for r in c.execute("SELECT id, amount_cents, resource, status, capture_id, paying_since "
+                                            "FROM pp_invoices WHERE mandate=? AND status IN "
+                                            "('paid','refunding','refunded') ORDER BY paying_since DESC LIMIT 20",
+                                            (mid,))]}
 
 
 _last_poll = {}

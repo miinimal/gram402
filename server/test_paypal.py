@@ -205,6 +205,10 @@ assert r.status_code == 200 and "Mandate approved" in r.text
 r = cl.get("/v1/mandates/m_unknown/approved", headers={"Accept": "text/html"})
 assert "not activated" in r.text
 
+# 19b. The owner sees the payment history with PayPal capture ids.
+hist = cl.get(f"/v1/mandates/{m['mandate']}", headers={"X-Mandate-Secret": m["secret"]}).json()["payments"]
+assert hist and all(p["capture"] and p["status"] in ("paid", "refunded") for p in hist), hist
+
 # 20. Approval confirmed by polling PayPal from the owner's status check (redirect never reached the server).
 m9 = cl.post("/v1/mandates", json={"budget_cents": 20, "per_request_cents": 5, "days": 1}).json()
 h9 = {"X-Mandate-Secret": m9["secret"]}
