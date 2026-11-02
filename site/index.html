@@ -51,6 +51,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .step b{display:block;font-size:15px;margin-bottom:4px}
 .step span{color:var(--muted);font-size:14px}
 .rails{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.rail code{font-family:var(--mono);font-size:.9em}
 @media (max-width:560px){.rails{grid-template-columns:1fr}}
 .rail{border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--card)}
 .rail b{font-family:var(--mono)}
@@ -62,9 +63,9 @@ footer{color:var(--muted);font-size:14px;border-top:1px solid var(--line);paddin
 <body>
 <div class="wrap">
   <header>
-    <div class="eyebrow">HTTP 402 · PayPal · GRAM on TON · open source</div>
+    <div class="eyebrow">HTTP 402 · PayPal · NEAR · GRAM on TON · open source</div>
     <h1>Your AI agent pays for itself. Never more than you allowed.</h1>
-    <p class="lead">An agent hits a paid API and gets HTTP 402. Instead of stopping for a human, it pays from a PayPal mandate you approved once, or with GRAM, and gets the answer with a signed receipt. Every limit is enforced by the server, not by the model.</p>
+    <p class="lead">An agent hits a paid API and gets HTTP 402. Instead of stopping for a human, it pays from a mandate you approved once (PayPal, or a NEAR smart contract), or with GRAM, and gets the answer with a signed receipt. Every limit is enforced by the server, not by the model.</p>
     <div class="cta">
       <a class="btn" href="#try">Try the simulator</a>
       <a class="btn alt" href="https://github.com/miinimal/gram402">Source on GitHub</a>
@@ -105,8 +106,9 @@ footer{color:var(--muted);font-size:14px;border-top:1px solid var(--line);paddin
   </section>
 
   <section>
-    <h2>One 402, two rails</h2>
+    <h2>One 402, three rails</h2>
     <div class="rails" style="margin-top:12px">
+      <div class="rail" style="grid-column:1/-1"><b>near-mandate</b><p>The mandate is a NEAR smart contract: cap per payment, budget, expiry and allowed merchants are enforced on chain. The agent holds a key that can only call <code>pay</code>, so even a compromised agent cannot move the funds elsewhere. <a href="https://testnet.nearblocks.io/address/mandate.g4021793638153-owner.testnet">Live on NEAR testnet</a>.</p></div>
       <div class="rail"><b>paypal-mandate</b><p>For agents whose owner pays with PayPal. Limits are held by the server; the model never sees the PayPal account.</p></div>
       <div class="rail"><b>ton-transfer</b><p>For agents with a TON wallet: a plain GRAM transfer with the invoice comment, verified on chain, no facilitator.</p></div>
     </div>
