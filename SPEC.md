@@ -211,3 +211,37 @@ currency}`, signed like every GRAM-402 receipt.
 
 Security: mandate secrets are stored as SHA-256 hashes; the PayPal vault id never leaves the server; every PayPal call
 uses a `PayPal-Request-Id`, so a retried capture cannot charge twice; an invoice settles at most once.
+
+## NEAR mandate rail (`near-mandate`)
+
+Status: draft v0.2 (2026-11-02). Contract: `near/contract`; server: `server/near402.py`; clients:
+`clients/python/near_mandate.py`, `clients/typescript/near_mandate.ts`; live run: `.github/workflows/near-e2e.yml`.
+
+The mandate is a NEAR contract. The owner calls `create_mandate(agent, per_payment_cap, valid_for_ms, merchants)`
+with a deposit; the deposit pays the mandate's own storage and the rest is the budget. The owner can `top_up` and
+`revoke` (unspent budget refunded; a failed refund re-activates the mandate).
+
+402 offer:
+
+```json
+{"scheme": "near-mandate", "network": "near-testnet", "asset": "NEAR", "maxAmountRequired": "1000000000000000000000",
+ "payTo": "shop.testnet",
+ "extra": {"invoice": "n_7cd532ebb46cd882", "secret": "<private>", "contract": "mandate.example.testnet",
+           "method": "pay", "decimals": 24,
+           "args": {"merchant": "shop.testnet", "amount": "1000000000000000000000", "invoice": "n_7cd532ebb46cd882"}}}
+```
+
+The agent calls `pay(mandate_id, ...args)` on the contract (0 deposit). The contract checks: caller is the
+mandate's agent, mandate active and not expired, merchant allowed, amount within the cap and the remaining budget;
+then logs `EVENT_JSON:{"standard":"near-mandate","event":"paid","data":[{mandate_id, merchant, amount, invoice}]}`
+and transfers the amount to the merchant. If the transfer fails, `on_paid` puts the amount back and logs `pay_failed`.
+
+The agent repeats the request with `X-PAYMENT = base64 JSON {x402Version:1, scheme:"near-mandate",
+payload:{invoice, secret, tx_hash, sender}}`. The server fetches the transaction with RPC `tx` (`wait_until: FINAL`)
+and requires: a `paid` event from a receipt executed by the mandate contract, with this invoice and this merchant and
+at least the price; no failed receipt and no `pay_failed` event; the transaction not used for another invoice.
+The secret binds the claim to whoever asked for the invoice. If the answer fails after a verified payment, the same
+X-PAYMENT is served once more.
+
+Payments add no contract state: nothing to pay storage for, and invoice ids cannot be squatted. The agent should hold
+only a function-call access key for `pay` on the mandate contract, so it cannot move the owner's funds otherwise.
