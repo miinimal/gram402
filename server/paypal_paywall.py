@@ -19,6 +19,7 @@ import re
 import sqlite3
 
 import paypal402
+import throttle
 
 _MID = re.compile(r"^/v1/mandates/(m_[0-9a-f]{16})(/approved|/cancelled)?$")
 
@@ -105,6 +106,9 @@ def paypal_paywall(app, prices, db_path=None, gram=None, description=""):
         xpay = hdrs.get("x-payment")
         claim = paypal402.parse_header(xpay) if xpay else None
         if not xpay:
+            if not throttle.allow((scope.get("client") or (None,))[0]):
+                return await reply(send, 429, {"error": "too many unpaid requests from this address; slow down"},
+                                   [(b"retry-after", b"60")])
             accepts = []
             if gram is not None and nano:
                 inv = await asyncio.to_thread(gram.invoice, nano, path, description)

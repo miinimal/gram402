@@ -22,6 +22,7 @@ import pay402
 import near402
 import paypal402
 import receipts
+import throttle
 
 DB = os.environ.get("GRAM402_DB", "gram402.db")
 UPSTREAM = os.environ.get("UPSTREAM_URL", "").rstrip("/")
@@ -175,6 +176,9 @@ async def chat(request: Request, authorization: str = Header(None)):
             raise HTTPException(401, "missing bearer key")
         xp = request.headers.get("x-payment")
         if not xp:
+            if not throttle.allow(request.client.host if request.client else None):
+                return JSONResponse({"error": "too many unpaid requests from this address; slow down"}, status_code=429,
+                                    headers={"Retry-After": "60"})
             res = "/v1/chat/completions"
             with db() as c:
                 req = {"x402Version": 1, "error": "payment required", "accepts": []}
