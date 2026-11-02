@@ -1,11 +1,29 @@
 # GRAM-402
 
-Pay-per-request for AI agents on TON. An agent that holds only a TON wallet calls a paid HTTP endpoint, gets
-**HTTP 402** with an invoice, pays with a plain GRAM transfer and receives the answer with a **signed receipt bound to
-the on-chain payment**. No signup, no API key, no human in the loop.
+**AI agents pay for APIs on their own, never more than their owner allowed.** A paid endpoint answers an unpaid
+request with **HTTP 402** and a list of ways to pay; the agent pays and gets the answer with a **signed receipt bound
+to the payment**. Three rails behind one 402:
 
-GRAM-402 uses the message shapes of [x402](https://docs.x402.org) (`accepts`, `X-PAYMENT`, `X-PAYMENT-RESPONSE`) with
-a TON-native scheme `ton-transfer`: no facilitator, any TON wallet can pay, the server verifies the transfer on TON.
+- **PayPal mandates**: the owner approves a spending mandate once on PayPal (budget, cap per request, expiry, allowed
+  endpoints); the server charges inside those limits only, and the owner can revoke at any time.
+- **NEAR mandates**: the same limits enforced by a smart contract; the agent's key can only call `pay`.
+- **GRAM on TON**: an agent with nothing but a TON wallet pays with a plain transfer; no signup, no API key.
+
+The problem: agents can call any API but cannot pay for one. A card needs a human at checkout, and handing an agent
+your card or seed phrase is unsafe. GRAM-402 keeps the human in control of the limits and out of the loop for each
+payment.
+
+## Try it
+
+| Do this | See this |
+|---|---|
+| Open https://ai.minimalcult.org/gram402, create a mandate, approve it with a PayPal **sandbox** buyer | "Mandate approved"; then "Show spending" lists every charge with its PayPal capture id |
+| `python3 demo/paypal_agent_demo.py` (no account needed, simulated PayPal) | the agent pays twice, is stopped by the budget, then refused after revoke |
+| Live PayPal sandbox run [41516703950](https://github.com/miinimal/gram402/actions/runs/41516703950) | captures `4AL30836MY6733008` and `3TJ7308016156922W`, budget stop, revoke |
+| NEAR testnet run (section [NEAR mandates](#near-mandates-limits-enforced-by-a-smart-contract)) | contract payments, over-cap payment refused on chain |
+| `cd server && python3 test_app.py && python3 test_paypal.py && python3 test_near.py` | all rails tested offline |
+
+The TON rail in detail:
 
 ```
 agent ── POST (no auth) ───────────────▶ server
@@ -230,7 +248,7 @@ Tests for all of the above: `cd server && python3 test_app.py`, `python3 clients
 
 ## Status
 
-Draft v0.1. Running on TON mainnet in the MINIMAL AI gateway (`https://ai.minimalcult.org`, Cocoon confidential
+v0.1. PayPal rail: live in the PayPal sandbox and in the hosted demo. NEAR rail: live on NEAR testnet. TON rail: running on TON mainnet in the MINIMAL AI gateway (`https://ai.minimalcult.org`, Cocoon confidential
 inference): paid chat requests, top-up of an existing account by comment, and the facilitator for other APIs.
 Next: wallet-signed requests (TON Connect proof), packages on PyPI and npm.
 
