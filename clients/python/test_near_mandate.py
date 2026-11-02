@@ -46,13 +46,23 @@ def opener(req, timeout=None):
     return Resp(r)
 
 
-agent = NearMandateClient("http://test", mandate_id=7, pay=pay, max_yocto=10**21, poll_s=0, opener=opener)
+agent = NearMandateClient("http://test", mandate_id=7, pay=pay, contract="mandate.gram402.testnet", max_yocto=10**21,
+                          poll_s=0, opener=opener)
 out = agent.chat(T.REQ)
 assert out["choices"][0]["message"]["content"].startswith("echo:")
 assert CALLS[-1]["mandate_id"] == 7 and agent.last_payment["network"] == "near-testnet"
 try:
-    NearMandateClient("http://test", 7, pay, max_yocto=1, opener=opener).chat(T.REQ)
+    NearMandateClient("http://test", 7, pay, "mandate.gram402.testnet", max_yocto=1, opener=opener).chat(T.REQ)
     raise AssertionError("price cap not enforced")
 except PaymentError as e:
     assert "max_yocto" in str(e)
+# A server that names another contract is refused before any payment.
+real_contract = T.near402.CONTRACT
+T.near402.CONTRACT = "evil.testnet"
+try:
+    NearMandateClient("http://test", 7, pay, "mandate.gram402.testnet", opener=opener).chat(T.REQ)
+    raise AssertionError("foreign contract accepted")
+except PaymentError as e:
+    assert "contract" in str(e)
+T.near402.CONTRACT = real_contract
 print("near mandate client OK")

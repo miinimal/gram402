@@ -120,7 +120,7 @@ r = both.get("/v1/weather", headers={"X-PAYMENT": "other"})
 assert r.status_code == 402 and r.headers.get("retry-after") == "5"
 import throttle  # noqa: E402
 throttle.LIMIT = 3
-throttle._hits.clear()
+throttle.reset()
 tc = TestClient(paypal_paywall(api, {"/v1/weather": 5}, tempfile.mktemp(suffix=".db")))
 codes = [tc.get("/v1/weather").status_code for _ in range(5)]
 assert codes == [402, 402, 402, 429, 429], codes

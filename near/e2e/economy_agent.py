@@ -31,7 +31,7 @@ def pay(contract, method, args):
     return {"tx_hash": m.group(1), "sender": AGENT_A}
 
 
-a = NearMandateClient("http://127.0.0.1:8402", 1, pay, max_yocto=20 * 10**21, wait_s=180, poll_s=3)
+a = NearMandateClient("http://127.0.0.1:8402", 1, pay, CONTRACT, max_yocto=20 * 10**21, wait_s=180, poll_s=3)
 revenue = cost = 0
 for i in range(2):
     out = a.chat({"model": "agent-b", "messages": [{"role": "user", "content": "Plan my day in Lisbon"}]})

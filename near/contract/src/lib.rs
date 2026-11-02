@@ -36,7 +36,8 @@ pub struct Mandate {
     pub merchants: Vec<AccountId>,
     pub status: Status,
     pub payments: u32,
-    /// Storage stake held for this mandate; returned to the owner on revoke.
+    /// Storage stake held for this mandate. It stays locked while the record exists (records are kept for audit),
+    /// so revoke refunds the unspent budget, not this stake.
     pub storage: NearToken,
 }
 
@@ -127,12 +128,21 @@ impl Contract {
         if env::promise_result_checked(0, 0).is_ok() {
             return true;
         }
+        let mut back_to_owner = None;
         if let Some(m) = self.mandates.get_mut(&mandate_id) {
             m.spent = m.spent.saturating_sub(amount);
             m.payments = m.payments.saturating_sub(1);
+            // Revoked while the transfer was in flight: revoke already refunded budget - spent (which still counted
+            // this amount), so the returned amount belongs to the owner, not to a budget nobody can spend.
+            if m.status == Status::Revoked {
+                back_to_owner = Some(m.owner.clone());
+            }
         }
         log!("EVENT_JSON:{{\"standard\":\"near-mandate\",\"version\":\"2.0.0\",\"event\":\"pay_failed\",\"data\":[{{\"mandate_id\":{},\"amount\":\"{}\"}}]}}",
              mandate_id, amount.as_yoctonear());
+        if let Some(owner) = back_to_owner {
+            Promise::new(owner).transfer(amount).detach();
+        }
         false
     }
 
@@ -280,6 +290,21 @@ mod tests {
         assert!(!c.on_paid(id, near(200)));
         let m = c.get_mandate(id).unwrap();
         assert_eq!((m.spent, m.payments), (NearToken::from_yoctonear(0), 0));
+    }
+
+    #[test]
+    fn failed_transfer_after_revoke_goes_to_the_owner() {
+        let (mut c, id) = setup();
+        ctx(1, NearToken::from_yoctonear(0), 2_000);
+        let _ = c.pay(id, accounts(2), near(200), "inv".into());
+        ctx(0, NearToken::from_yoctonear(0), 2_500);
+        let _ = c.revoke(id);
+        ctx_result(PromiseResult::Failed);
+        assert!(!c.on_paid(id, near(200)));
+        let m = c.get_mandate(id).unwrap();
+        assert_eq!((m.status, m.spent), (Status::Revoked, NearToken::from_yoctonear(0)));
+        let receipts = near_sdk::test_utils::get_created_receipts();
+        assert!(receipts.iter().any(|r| r.receiver_id == accounts(0)), "amount was not sent back to the owner");
     }
 
     #[test]

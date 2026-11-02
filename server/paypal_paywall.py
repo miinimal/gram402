@@ -16,6 +16,7 @@ Money goes straight to your PayPal account; nobody sits in between. Author: Alek
 import json
 import os
 import re
+import secrets
 import sqlite3
 
 import paypal402
@@ -68,7 +69,8 @@ def paypal_paywall(app, prices, db_path=None, gram=None, description=""):
                 client = scope.get("client") or (None,)
                 with db() as c:
                     m = await paypal402.create_mandate(c, b.get("budget_cents", 500), b.get("per_request_cents", 25),
-                                                       b.get("days", 30), b.get("resources"), ip=client[0])
+                                                       b.get("days", 30), b.get("resources"),
+                                                       ip=throttle.client_ip(client[0], hdrs))
             except paypal402.RateLimited as e:
                 return await reply(send, 429, {"error": str(e)})
             return await reply(send, 200, m)
@@ -105,8 +107,12 @@ def paypal_paywall(app, prices, db_path=None, gram=None, description=""):
         cents, nano = _price(prices[path])
         xpay = hdrs.get("x-payment")
         claim = paypal402.parse_header(xpay) if xpay else None
+        ip = throttle.client_ip((scope.get("client") or (None,))[0], hdrs)
+        if xpay and not throttle.allow(ip, kind="pay"):
+            return await reply(send, 429, {"error": "too many payment attempts from this address; slow down"},
+                               [(b"retry-after", b"60")])
         if not xpay:
-            if not throttle.allow((scope.get("client") or (None,))[0]):
+            if not throttle.allow(ip):
                 return await reply(send, 429, {"error": "too many unpaid requests from this address; slow down"},
                                    [(b"retry-after", b"60")])
             accepts = []
@@ -116,6 +122,11 @@ def paypal_paywall(app, prices, db_path=None, gram=None, description=""):
             if cents:
                 with db() as c:
                     accepts.append(paypal402.accept(paypal402.create_invoice(c, int(cents), path), path))
+                    if secrets.randbelow(50) == 0:  # sweep invoices abandoned mid-payment
+                        try:
+                            await paypal402.reconcile(c)
+                        except Exception:  # noqa: BLE001
+                            pass
             if not accepts:
                 return await reply(send, 503, {"error": "payment service unavailable"})
             return await reply(send, 402, {"x402Version": 1, "error": "payment required", "accepts": accepts})

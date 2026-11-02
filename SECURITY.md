@@ -27,4 +27,8 @@ TON infrastructure) and their own bugs.
 - Secrets are stored only as hashes; PayPal vault ids never leave the server.
 - Every external payment call is idempotent; an invoice settles at most once; a public invoice id never settles
   without its private secret.
+- Unpaid requests and payment attempts are rate-limited per address (IPv6 per /64); `X-Forwarded-For` is honoured
+  only with `TRUST_X_FORWARDED_FOR=1` behind your own proxy. Public demos set `PAYPAL_SANDBOX_ONLY=1`.
+- Agent clients never execute a server-chosen contract call: the NEAR contract comes from client configuration and
+  the arguments are built by the client.
 - Every change runs the full test suite in CI; payment changes come with tests for the abuse cases they touch.

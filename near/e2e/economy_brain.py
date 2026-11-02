@@ -63,7 +63,7 @@ def pay(contract, method, args):
 @app.post("/chat/completions")
 def plan(body: dict):
     mid = procurement_mandate()
-    shop = NearMandateClient(DATA_URL, mid, pay, max_yocto=int(PROC_CAP), poll_s=2)
+    shop = NearMandateClient(DATA_URL, mid, pay, CONTRACT, max_yocto=int(PROC_CAP), poll_s=2)
     weather = shop.chat({"model": "weather", "messages": [{"role": "user", "content": "Lisbon tomorrow"}]})
     w = weather["choices"][0]["message"]["content"]
     state["bought"] += 1

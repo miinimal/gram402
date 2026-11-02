@@ -91,9 +91,26 @@ async def mandate_create(request: Request):
         with db() as c:
             return await paypal402.create_mandate(c, b.get("budget_cents", 500), b.get("per_request_cents", 25),
                                                   b.get("days", 30), b.get("resources"),
-                                                  ip=request.client.host if request.client else None)
+                                                  ip=_ip(request))
     except paypal402.RateLimited as e:
         raise HTTPException(429, str(e))
+
+
+@app.on_event("startup")
+async def _reconcile_loop():
+    """Every 5 minutes: settle or release PayPal invoices left in 'paying' by agents that never came back."""
+    import asyncio
+
+    async def loop():
+        while True:
+            await asyncio.sleep(300)
+            if paypal402.enabled():
+                try:
+                    with db() as c:
+                        await paypal402.reconcile(c)
+                except Exception:  # noqa: BLE001
+                    pass
+    asyncio.get_event_loop().create_task(loop())
 
 
 OWNER_PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "owner.html")
@@ -165,6 +182,10 @@ async def verify(request: Request):
         return {"valid": False, "error": str(e)[:200]}
 
 
+def _ip(request):
+    return throttle.client_ip(request.client.host if request.client else None, request.headers)
+
+
 @app.post("/v1/chat/completions")
 async def chat(request: Request, authorization: str = Header(None)):
     body = await request.json()
@@ -175,8 +196,11 @@ async def chat(request: Request, authorization: str = Header(None)):
         if not pay402.enabled() and not paypal402.enabled() and not near402.enabled():
             raise HTTPException(401, "missing bearer key")
         xp = request.headers.get("x-payment")
+        if xp and not throttle.allow(_ip(request), kind="pay"):
+            return JSONResponse({"error": "too many payment attempts from this address; slow down"}, status_code=429,
+                                headers={"Retry-After": "60"})
         if not xp:
-            if not throttle.allow(request.client.host if request.client else None):
+            if not throttle.allow(_ip(request)):
                 return JSONResponse({"error": "too many unpaid requests from this address; slow down"}, status_code=429,
                                     headers={"Retry-After": "60"})
             res = "/v1/chat/completions"
@@ -254,10 +278,12 @@ async def chat_paypal(body, claim):
            "charged_cents": st["charged_cents"], "currency": paypal402.CURRENCY}
     try:
         resp = await answer(body)
-    except HTTPException as e:
+    except Exception as e:  # noqa: BLE001  (HTTP error, timeout, connection failure: not served -> refund)
         with db() as c:
             rf = await paypal402.refund(c, st)
-        return JSONResponse({"error": {"message": e.detail}, "payment": pay, "refund": rf}, status_code=e.status_code)
+        code = e.status_code if isinstance(e, HTTPException) else 502
+        detail = e.detail if isinstance(e, HTTPException) else "upstream unavailable"
+        return JSONResponse({"error": {"message": detail}, "payment": pay, "refund": rf}, status_code=code)
     resp["gram402"] = {"charged_cents": st["charged_cents"], "mandate_left_cents": st["mandate_left_cents"],
                        "receipt": receipts.make(body, resp, "upstream" if UPSTREAM else "echo", None, pay),
                        "payment": pay}
@@ -275,12 +301,14 @@ async def chat_near(body, claim):
            "charged_yocto": str(st["charged_yocto"])}
     try:
         resp = await answer(body)
-    except HTTPException as e:
+    except Exception as e:  # noqa: BLE001
         with db() as c:
             near402.credit(c, st["invoice"])
-        return JSONResponse({"error": {"message": e.detail}, "payment": pay,
+        code = e.status_code if isinstance(e, HTTPException) else 502
+        return JSONResponse({"error": {"message": e.detail if isinstance(e, HTTPException) else "upstream unavailable"},
+                             "payment": pay,
                              "credit": "repeat the same X-PAYMENT once to get the answer without paying again"},
-                            status_code=e.status_code)
+                            status_code=code)
     resp["gram402"] = {"receipt": receipts.make(body, resp, "upstream" if UPSTREAM else "echo", None, pay),
                        "payment": pay}
     return JSONResponse(resp, headers={"X-PAYMENT-RESPONSE": near402.response_header(st)})

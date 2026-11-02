@@ -231,10 +231,13 @@ with a deposit; the deposit pays the mandate's own storage and the rest is the b
            "args": {"merchant": "shop.testnet", "amount": "1000000000000000000000", "invoice": "n_7cd532ebb46cd882"}}}
 ```
 
-The agent calls `pay(mandate_id, ...args)` on the contract (0 deposit). The contract checks: caller is the
+The agent calls `pay(mandate_id, merchant, amount, invoice)` on the contract (0 deposit). Clients must take the
+contract from their own configuration (refuse an offer naming another) and build these arguments themselves from
+`payTo`, the price they checked against their cap and `extra.invoice`; `extra.args` is informational. The contract checks: caller is the
 mandate's agent, mandate active and not expired, merchant allowed, amount within the cap and the remaining budget;
 then logs `EVENT_JSON:{"standard":"near-mandate","event":"paid","data":[{mandate_id, merchant, amount, invoice}]}`
-and transfers the amount to the merchant. If the transfer fails, `on_paid` puts the amount back and logs `pay_failed`.
+and transfers the amount to the merchant. If the transfer fails, `on_paid` puts the amount back and logs `pay_failed`
+(if the owner revoked the mandate meanwhile, the amount goes to the owner instead).
 
 The agent repeats the request with `X-PAYMENT = base64 JSON {x402Version:1, scheme:"near-mandate",
 payload:{invoice, secret, tx_hash, sender}}`. The server fetches the transaction with RPC `tx` (`wait_until: FINAL`)

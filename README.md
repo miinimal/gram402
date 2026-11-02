@@ -189,8 +189,10 @@ testnet transactions.)
 
 B's result: revenue 0.020 NEAR, data cost 0.002 NEAR, gross margin 0.018 NEAR, all visible on chain.
 
-Agent side: `clients/python/near_mandate.py` and `clients/typescript/near_mandate.ts` — `NearMandateClient(url, mandate_id, pay)` answers 402 by calling
-`pay` on the contract through your signing callback (any NEAR library or near-cli-rs), with its own price cap.
+Agent side: `clients/python/near_mandate.py` and `clients/typescript/near_mandate.ts` — `NearMandateClient(url, mandate_id, pay, contract)` answers 402 by calling
+`pay` on the contract through your signing callback (any NEAR library or near-cli-rs), with its own price cap. The
+contract comes from the agent's configuration and the call arguments are built by the client (its mandate, the
+advertised merchant, the checked price), so a hostile server cannot redirect the call or inflate the amount.
 
 Reproduce: `.github/workflows/near-e2e.yml` (fresh faucet accounts, deploy, mandate, agent payments).
 

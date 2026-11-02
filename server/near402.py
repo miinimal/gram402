@@ -115,9 +115,15 @@ def verify_tx(tx, invoice, amount_yocto):
     """The transaction must hold a `paid` event from the mandate contract for this invoice and merchant, at least the
     price, and no failed receipt (a failed transfer to the merchant is a failed receipt)."""
     outcomes = tx.get("receipts_outcome") or []
-    if "Failure" in (tx.get("status") or {}) or any("Failure" in ((o.get("outcome") or {}).get("status") or {})
-                                                     for o in outcomes):
+    if tx.get("final_execution_status") not in (None, "FINAL"):
+        return "the transaction is not final yet"
+    ok_status = ("SuccessValue", "SuccessReceiptId")
+    if not isinstance(tx.get("status"), dict) or not any(k in tx["status"] for k in ok_status):
         return "the payment transaction failed"
+    for o in outcomes:
+        st = (o.get("outcome") or {}).get("status")
+        if not isinstance(st, dict) or not any(k in st for k in ok_status):
+            return "the payment transaction failed or is not final"
     for o in outcomes:
         out = o.get("outcome") or {}
         if out.get("executor_id") != CONTRACT:
@@ -141,7 +147,9 @@ async def settle(c, claim, now=None):
     if not row or not secrets.compare_digest(row["secret_hash"], _h(claim["secret"])):
         return {"ok": False, "error": "unknown invoice or wrong secret"}
     if row["status"] == "credit":  # paid earlier, answer failed: serve once more without a new payment
-        c.execute("UPDATE near_invoices SET status='paid' WHERE id=? AND status='credit'", (row["id"],))
+        cur = c.execute("UPDATE near_invoices SET status='paid' WHERE id=? AND status='credit'", (row["id"],))
+        if cur.rowcount != 1:
+            return {"ok": False, "error": "invoice already settled"}
         return {"ok": True, "network": network_id(), "transaction": row["tx_hash"],
                 "payer": f"mandate:{row['mandate_id']}", "charged_yocto": int(row["amount_yocto"]), "invoice": row["id"]}
     if row["status"] != "open":

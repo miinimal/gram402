@@ -4,7 +4,8 @@
     def pay(contract, method, args):            # sign with the agent's NEAR key (any library or near-cli-rs)
         ...                                      # call `method` on `contract` with JSON `args`, 0 deposit, 30 Tgas
         return {"tx_hash": tx_hash, "sender": agent_account}
-    agent = NearMandateClient("https://api.example", mandate_id=1, pay=pay, max_yocto=10**22)
+    agent = NearMandateClient("https://api.example", mandate_id=1, pay=pay, contract="mandate.example.near",
+                              max_yocto=10**22)
     answer = agent.chat({"model": "default", "messages": [{"role": "user", "content": "hi"}]})
 
 On HTTP 402 the client takes the near-mandate offer, refuses prices above `max_yocto`, calls `pay` on the mandate
@@ -27,8 +28,10 @@ class PaymentError(Exception):
 
 
 class NearMandateClient:
-    def __init__(self, base_url, mandate_id, pay, max_yocto=10**22, wait_s=60, poll_s=3, opener=None):
+    def __init__(self, base_url, mandate_id, pay, contract, max_yocto=10**22, wait_s=60, poll_s=3, opener=None):
+        """`contract`: the mandate contract this agent uses (from its own configuration, never from the server)."""
         self.base = base_url.rstrip("/")
+        self.contract = contract
         self.mandate_id, self.pay, self.max_yocto = int(mandate_id), pay, int(max_yocto)
         self.wait_s, self.poll_s = wait_s, poll_s
         self.last_payment = None
@@ -63,7 +66,12 @@ class NearMandateClient:
         if price > self.max_yocto:
             raise PaymentError(f"price {price} yoctoNEAR exceeds max_yocto {self.max_yocto}")
         ex = acc["extra"]
-        tx = self.pay(ex["contract"], ex.get("method", "pay"), {"mandate_id": self.mandate_id, **ex["args"]}) or {}
+        if ex.get("contract") != self.contract:
+            raise PaymentError(f"offer names contract {ex.get('contract')!r}, configured {self.contract!r}")
+        # Arguments are built here, not taken from the server: our mandate, the advertised merchant, the checked price.
+        args = {"mandate_id": self.mandate_id, "merchant": str(acc["payTo"]), "amount": str(price),
+                "invoice": str(ex["invoice"])}
+        tx = self.pay(self.contract, "pay", args) or {}
         if not tx.get("tx_hash") or not tx.get("sender"):
             raise PaymentError("pay callback must return {'tx_hash', 'sender'} of the pay() transaction")
         xpay = base64.b64encode(json.dumps({"x402Version": 1, "scheme": SCHEME, "payload": {

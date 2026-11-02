@@ -143,6 +143,59 @@ A.answer = real_answer
 assert r.status_code == 502 and r.json()["refund"]["refunded"] and STATE["refunds"], r.text
 assert cl.get(f"/v1/mandates/{m6['mandate']}", headers={"X-Mandate-Secret": m6["secret"]}).json()["spent_cents"] == 0
 
+# 16. Five parallel retries of one payment whose outcome was unknown: exactly one answer, one charge.
+import asyncio  # noqa: E402
+import httpx as _hx  # noqa: E402
+m8 = cl.post("/v1/mandates", json={"budget_cents": 100, "per_request_cents": 10, "days": 1}).json()
+cl.get(f"/v1/mandates/{m8['mandate']}/approved")
+inv8 = invoice()
+STATE["error_next"] = True
+assert cl.post("/v1/chat/completions", json=REQ, headers={"X-PAYMENT": xpay(m8["mandate"], m8["secret"], inv8)}).status_code == 402
+
+
+async def burst():
+    async with _hx.AsyncClient(transport=_hx.ASGITransport(app=A.app), base_url="http://t") as ac:
+        rs = await asyncio.gather(*[ac.post("/v1/chat/completions", json=REQ,
+                                            headers={"X-PAYMENT": xpay(m8["mandate"], m8["secret"], inv8)}) for _ in range(5)])
+    return [r.status_code for r in rs]
+codes = asyncio.run(burst())
+assert codes.count(200) == 1, codes
+assert cl.get(f"/v1/mandates/{m8['mandate']}", headers={"X-Mandate-Secret": m8["secret"]}).json()["spent_cents"] == 10
+
+# 17. A refund runs once even if asked twice; the budget is given back once.
+with A.db() as c:
+    st = {"transaction": c.execute("SELECT capture_id FROM pp_invoices WHERE id=?", (inv8,)).fetchone()[0],
+          "charged_cents": 10, "payer": m8["mandate"]}
+    r1 = asyncio.run(paypal402.refund(c, st))
+    r2 = asyncio.run(paypal402.refund(c, st))
+assert r1["refunded"] and not r2["refunded"]
+assert cl.get(f"/v1/mandates/{m8['mandate']}", headers={"X-Mandate-Secret": m8["secret"]}).json()["spent_cents"] == 0
+
+# 18. Upstream timeout (not an HTTPException): refunded.
+inv9 = invoice()
+real_answer = A.answer
+
+
+async def timeout(body):
+    raise _hx.ReadTimeout("upstream timeout")
+A.answer = timeout
+r = cl.post("/v1/chat/completions", json=REQ, headers={"X-PAYMENT": xpay(m8["mandate"], m8["secret"], inv9)})
+A.answer = real_answer
+assert r.status_code == 502 and r.json()["refund"]["refunded"], r.text
+
+# 19. Pending capture abandoned by the agent: the sweep refunds once PayPal completes it.
+inv10 = invoice()
+STATE["pending_next"] = True
+r = cl.post("/v1/chat/completions", json=REQ, headers={"X-PAYMENT": xpay(m8["mandate"], m8["secret"], inv10)})
+assert r.status_code == 402 and "PENDING" in r.json()["error"]
+with A.db() as c:
+    oid = c.execute("SELECT order_id FROM pp_invoices WHERE id=?", (inv10,)).fetchone()[0]
+    STATE["by_order_id"][oid]["purchase_units"][0]["payments"]["captures"][0]["status"] = "COMPLETED"
+    n_ref = len(STATE["refunds"])
+    asyncio.run(paypal402.reconcile(c, older_than_s=-1))
+    assert c.execute("SELECT status FROM pp_invoices WHERE id=?", (inv10,)).fetchone()[0] == "refunded"
+assert len(STATE["refunds"]) == n_ref + 1
+
 # 12. Owner page and browser-facing approval result.
 r = cl.get("/mandates")
 assert r.status_code == 200 and "Agent spending mandates" in r.text

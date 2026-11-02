@@ -4,7 +4,7 @@
 //   const agent = new NearMandateClient('https://api.example', 1, async (contract, method, args) => {
 //     const out = await account.callFunction({ contractId: contract, methodName: method, args, gas: 30_000_000_000_000n });
 //     return { txHash: out.transaction.hash, sender: account.accountId };
-//   }, { maxYocto: 10n ** 22n });
+//   }, 'mandate.example.near', { maxYocto: 10n ** 22n });
 //   const answer = await agent.chat({ model: 'default', messages: [{ role: 'user', content: 'hi' }] });
 //
 // On HTTP 402 the client takes the near-mandate offer, refuses prices above maxYocto, calls `pay` on the mandate
@@ -26,7 +26,8 @@ export class NearMandateClient {
   private waitMs: number;
   private pollMs: number;
 
-  constructor(baseUrl: string, private mandateId: number, private pay: NearPay,
+  // contract: the mandate contract from the agent's own configuration, never from the server.
+  constructor(baseUrl: string, private mandateId: number, private pay: NearPay, private contract: string,
               opts: { maxYocto?: bigint; waitMs?: number; pollMs?: number } = {}) {
     this.base = baseUrl.replace(/\/+$/, '');
     this.maxYocto = opts.maxYocto ?? 10n ** 22n;
@@ -53,7 +54,10 @@ export class NearMandateClient {
     const price = BigInt(acc.maxAmountRequired);
     if (price > this.maxYocto) throw new PaymentError(`price ${price} yoctoNEAR exceeds maxYocto ${this.maxYocto}`);
     const ex = acc.extra;
-    const tx = await this.pay(ex.contract, ex.method || 'pay', { mandate_id: this.mandateId, ...ex.args });
+    if (ex.contract !== this.contract) throw new PaymentError(`offer names contract ${ex.contract}, configured ${this.contract}`);
+    // Arguments are built here, not taken from the server: our mandate, the advertised merchant, the checked price.
+    const tx = await this.pay(this.contract, 'pay',
+      { mandate_id: this.mandateId, merchant: String(acc.payTo), amount: price.toString(), invoice: String(ex.invoice) });
     if (!tx?.txHash || !tx?.sender) throw new PaymentError('pay callback must return { txHash, sender }');
     const xpay = b64(JSON.stringify({ x402Version: 1, scheme: SCHEME,
       payload: { invoice: ex.invoice, secret: ex.secret, tx_hash: tx.txHash, sender: tx.sender } }));

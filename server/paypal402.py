@@ -33,6 +33,10 @@ CLIENT_ID = ENV("PAYPAL_CLIENT_ID", "")
 CLIENT_SECRET = ENV("PAYPAL_CLIENT_SECRET", "")
 PP_ENV = ENV("PAYPAL_ENV", "sandbox")
 BASE = {"sandbox": "https://api-m.sandbox.paypal.com", "live": "https://api-m.paypal.com"}
+if PP_ENV not in BASE:
+    raise RuntimeError(f"PAYPAL_ENV must be sandbox or live, got {PP_ENV!r}")
+if ENV("PAYPAL_SANDBOX_ONLY", "") == "1" and PP_ENV != "sandbox":  # public demos: never touch real money
+    raise RuntimeError("PAYPAL_SANDBOX_ONLY=1 but PAYPAL_ENV is not sandbox")
 PUBLIC_URL = ENV("PUBLIC_URL", "http://localhost:8402").rstrip("/")
 PRICE_CENTS = int(ENV("PAYPAL_PRICE_CENTS", "5"))
 CURRENCY = ENV("PAYPAL_CURRENCY", "USD")
@@ -76,12 +80,15 @@ def setup_db(c):
         expires INTEGER, budget_cents INTEGER, per_request_cents INTEGER, spent_cents INTEGER NOT NULL DEFAULT 0,
         resources TEXT, status TEXT NOT NULL DEFAULT 'pending', setup_token TEXT, vault_id TEXT, payer TEXT, ip TEXT);
     CREATE TABLE IF NOT EXISTS pp_invoices(id TEXT PRIMARY KEY, mandate TEXT, created INTEGER, expires INTEGER,
-        amount_cents INTEGER, resource TEXT, status TEXT NOT NULL DEFAULT 'open', capture_id TEXT);
+        amount_cents INTEGER, resource TEXT, status TEXT NOT NULL DEFAULT 'open', capture_id TEXT, order_id TEXT,
+        paying_since INTEGER);
     """)
-    try:  # databases created before the per-IP limit
-        c.execute("ALTER TABLE pp_mandates ADD COLUMN ip TEXT")
-    except Exception:  # noqa: BLE001
-        pass
+    for ddl in ("ALTER TABLE pp_mandates ADD COLUMN ip TEXT", "ALTER TABLE pp_invoices ADD COLUMN order_id TEXT",
+                "ALTER TABLE pp_invoices ADD COLUMN paying_since INTEGER"):
+        try:  # databases created by earlier versions
+            c.execute(ddl)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _client():
@@ -242,27 +249,29 @@ def _check(c, claim, now, expect_resource=None, expect_cents=None):
     return m, inv, False, None
 
 
-async def settle(c, claim, now=None, expect_resource=None, expect_cents=None):
-    """Check limits, reserve the amount, capture on PayPal.
-    - PayPal refuses (4xx): the reservation is released, nothing was charged.
-    - outcome unknown (timeout, 5xx, capture pending): the invoice stays reserved for this mandate; retrying the same
-      X-PAYMENT repeats the calls with the same idempotency keys, so PayPal never charges twice.
-    `expect_resource`/`expect_cents` bind the invoice to the endpoint and price being served."""
-    now = now or int(time.time())
-    m, inv, resume, err = _check(c, claim, now, expect_resource, expect_cents)
-    if err:
-        return {"ok": False, "error": err}
-    if not resume:
-        cur = c.execute("UPDATE pp_mandates SET spent_cents=spent_cents+? WHERE id=? AND spent_cents+?<=budget_cents",
-                        (inv["amount_cents"], m["id"], inv["amount_cents"]))
-        cur2 = c.execute("UPDATE pp_invoices SET status='paying', mandate=? WHERE id=? AND status='open'",
-                         (m["id"], inv["id"]))
-        if cur.rowcount != 1 or cur2.rowcount != 1:
-            c.rollback()
-            return {"ok": False, "error": "concurrent payment; retry"}
-        c.commit()
-    key = f"{inv['id']}-{m['id']}"
+def _release(c, inv_id, mid, cents):
+    """Undo a reservation only if this mandate still holds the invoice in 'paying' (never reopens a paid invoice)."""
+    cur = c.execute("UPDATE pp_invoices SET status='open', mandate=NULL, order_id=NULL, paying_since=NULL "
+                    "WHERE id=? AND status='paying' AND mandate=?", (inv_id, mid))
+    if cur.rowcount == 1:
+        c.execute("UPDATE pp_mandates SET spent_cents=spent_cents-? WHERE id=?", (cents, mid))
+    c.commit()
+
+
+def _capture_of(order):
     try:
+        return order["purchase_units"][0]["payments"]["captures"][0]
+    except (KeyError, IndexError, TypeError):
+        return None
+
+
+async def _drive(c, m, inv, resume):
+    """Bring the PayPal order for this invoice to a final state. Returns (order, capture) or raises Declined/other."""
+    key = f"{inv['id']}-{m['id']}"
+    order_id = inv["order_id"] if resume else None
+    if order_id:  # outcome of an earlier attempt: ask PayPal, never rely on the idempotency cache alone
+        order = await _call("GET", f"/v2/checkout/orders/{order_id}")
+    else:
         order = await _call("POST", "/v2/checkout/orders", {
             "intent": "CAPTURE",
             "purchase_units": [{"amount": {"currency_code": CURRENCY, "value": _money(inv["amount_cents"])},
@@ -273,28 +282,66 @@ async def settle(c, claim, now=None, expect_resource=None, expect_cents=None):
                                                                 "usage": "SUBSEQUENT",
                                                                 "usage_pattern": "UNSCHEDULED_POSTPAID"}}}},
             request_id="order-" + key)
-        if order.get("status") != "COMPLETED":
-            order = await _call("POST", f"/v2/checkout/orders/{order['id']}/capture", {}, request_id="capture-" + key)
-        cap = order["purchase_units"][0]["payments"]["captures"][0]
-    except Declined as e:
-        c.execute("UPDATE pp_mandates SET spent_cents=spent_cents-? WHERE id=?", (inv["amount_cents"], m["id"]))
-        c.execute("UPDATE pp_invoices SET status='open', mandate=NULL WHERE id=?", (inv["id"],))
+        if order.get("id"):
+            c.execute("UPDATE pp_invoices SET order_id=? WHERE id=? AND status='paying'", (order["id"], inv["id"]))
+            c.commit()
+    if order.get("status") in ("CREATED", "APPROVED", "PAYER_ACTION_REQUIRED") or (
+            order.get("status") != "COMPLETED" and not _capture_of(order)):
+        order = await _call("POST", f"/v2/checkout/orders/{order['id']}/capture", {}, request_id="capture-" + key)
+    return order, _capture_of(order)
+
+
+async def settle(c, claim, now=None, expect_resource=None, expect_cents=None):
+    """Check limits, reserve the amount, capture on PayPal.
+    - PayPal refuses (4xx) a fresh attempt: the reservation is released, nothing was charged.
+    - outcome unknown (timeout, 5xx, capture pending): the invoice stays reserved for this mandate; a retry asks PayPal
+      for the stored order, so it is never charged twice and never served twice.
+    `expect_resource`/`expect_cents` bind the invoice to the endpoint and price being served."""
+    now = now or int(time.time())
+    m, inv, resume, err = _check(c, claim, now, expect_resource, expect_cents)
+    if err:
+        return {"ok": False, "error": err}
+    if not resume:
+        cur = c.execute("UPDATE pp_mandates SET spent_cents=spent_cents+? WHERE id=? AND spent_cents+?<=budget_cents",
+                        (inv["amount_cents"], m["id"], inv["amount_cents"]))
+        cur2 = c.execute("UPDATE pp_invoices SET status='paying', mandate=?, paying_since=? WHERE id=? AND status='open'",
+                         (m["id"], now, inv["id"]))
+        if cur.rowcount != 1 or cur2.rowcount != 1:
+            c.rollback()
+            return {"ok": False, "error": "concurrent payment; retry"}
         c.commit()
+        inv = c.execute("SELECT * FROM pp_invoices WHERE id=?", (inv["id"],)).fetchone()
+    try:
+        order, cap = await _drive(c, m, inv, resume)
+    except Declined as e:
+        if resume and inv["order_id"]:
+            return {"ok": False, "retry": True, "error": "PayPal is still processing this payment; repeat later"}
+        _release(c, inv["id"], m["id"], inv["amount_cents"])
         return {"ok": False, "error": "PayPal refused the payment: " + str(e)[:200]}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "retry": True, "error": "PayPal outcome unknown, nothing released; repeat the same request "
                                                    "to finish the payment (" + str(e)[:120] + ")"}
-    if order.get("status") != "COMPLETED" or cap.get("status") != "COMPLETED":
-        return {"ok": False, "retry": True, "error": "PayPal capture is " + str(cap.get("status")) + "; repeat later"}
-    c.execute("UPDATE pp_invoices SET status='paid', capture_id=? WHERE id=?", (cap["id"], inv["id"]))
+    if not cap or order.get("status") != "COMPLETED" or cap.get("status") != "COMPLETED":
+        if cap and cap.get("status") in ("DECLINED", "FAILED"):
+            _release(c, inv["id"], m["id"], inv["amount_cents"])
+            return {"ok": False, "error": "PayPal declined the capture"}
+        return {"ok": False, "retry": True, "error": "PayPal capture is " + str((cap or {}).get("status")) + "; repeat later"}
+    cur = c.execute("UPDATE pp_invoices SET status='paid', capture_id=? WHERE id=? AND status='paying' AND mandate=?",
+                    (cap["id"], inv["id"], m["id"]))
     c.commit()
+    if cur.rowcount != 1:  # a parallel retry already settled it: one payment, one answer
+        return {"ok": False, "error": "invoice already settled"}
     spent = c.execute("SELECT spent_cents FROM pp_mandates WHERE id=?", (m["id"],)).fetchone()[0]
     return {"ok": True, "network": network_id(), "transaction": cap["id"], "payer": m["id"], "invoice": inv["id"],
             "charged_cents": inv["amount_cents"], "mandate_left_cents": m["budget_cents"] - spent}
 
 
 async def refund(c, st):
-    """The answer could not be delivered after payment: refund the capture and give the budget back."""
+    """The answer could not be delivered after payment: refund the capture once and give the budget back."""
+    cur = c.execute("UPDATE pp_invoices SET status='refunding' WHERE capture_id=? AND status='paid'", (st["transaction"],))
+    c.commit()
+    if cur.rowcount != 1:
+        return {"refunded": False, "error": "already refunded or not refundable"}
     try:
         await _call("POST", f"/v2/payments/captures/{st['transaction']}/refund", {},
                     request_id="refund-" + st["transaction"])
@@ -306,6 +353,32 @@ async def refund(c, st):
     c.execute("UPDATE pp_invoices SET status='refunded' WHERE capture_id=?", (st["transaction"],))
     c.commit()
     return {"refunded": True}
+
+
+async def reconcile(c, older_than_s=900, now=None):
+    """Background sweep for invoices left in 'paying' (agent never came back): ask PayPal for the order; a completed
+    capture nobody received is refunded, a refused or missing one releases the reservation."""
+    now = now or int(time.time())
+    rows = c.execute("SELECT * FROM pp_invoices WHERE status='paying' AND paying_since<? LIMIT 20",
+                     (now - older_than_s,)).fetchall()
+    for inv in rows:
+        try:
+            order = await _call("GET", f"/v2/checkout/orders/{inv['order_id']}") if inv["order_id"] else None
+        except Declined:
+            order = None
+        except Exception:  # noqa: BLE001  (PayPal unavailable: try again next sweep)
+            continue
+        cap = _capture_of(order) if order else None
+        if cap and cap.get("status") == "COMPLETED":
+            c.execute("UPDATE pp_invoices SET status='paid', capture_id=? WHERE id=? AND status='paying'",
+                      (cap["id"], inv["id"]))
+            c.commit()
+            await refund(c, {"transaction": cap["id"], "charged_cents": inv["amount_cents"], "payer": inv["mandate"]})
+        elif cap and cap.get("status") == "PENDING":
+            continue
+        else:
+            _release(c, inv["id"], inv["mandate"], inv["amount_cents"])
+    return len(rows)
 
 
 def response_header(s):
