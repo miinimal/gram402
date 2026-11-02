@@ -24,9 +24,9 @@ jobs:
         with: {python-version: "3.12"}
       - run: pip install -q -r server/requirements.txt playwright && python -m playwright install --with-deps chromium
       - name: create
-        run: GRAM402_DB=$RUNNER_TEMP/demo.db DEMO_STATE=$RUNNER_TEMP/mandate.json DEMO_RECORD_DIR=$RUNNER_TEMP/rec DEMO_PHASE=create python3 demo/paypal_agent_demo.py
+        run: GRAM402_DB=$RUNNER_TEMP/demo.db DEMO_STATE=$RUNNER_TEMP/mandate.json DEMO_RECORD_DIR=$RUNNER_TEMP/rec DEMO_PHASE=create python3 demo/paypal_agent_demo.py | tee $RUNNER_TEMP/create.log
       - name: run
-        run: GRAM402_DB=$RUNNER_TEMP/demo.db DEMO_STATE=$RUNNER_TEMP/mandate.json DEMO_RECORD_DIR=$RUNNER_TEMP/rec DEMO_PHASE=run python3 demo/paypal_agent_demo.py
+        run: GRAM402_DB=$RUNNER_TEMP/demo.db DEMO_STATE=$RUNNER_TEMP/mandate.json DEMO_RECORD_DIR=$RUNNER_TEMP/rec DEMO_PHASE=run python3 demo/paypal_agent_demo.py | tee $RUNNER_TEMP/rec/run.log
       - name: recordings of the owner page (sandbox; the mandate is revoked at the end of the run)
         if: always()
         uses: actions/upload-artifact@v4
@@ -36,10 +36,11 @@ jobs:
         run: |
           set -e
           ls "$RUNNER_TEMP"/rec/*.webm >/dev/null 2>&1 || exit 0
+          sudo apt-get install -y -qq ffmpeg >/dev/null
           out=$RUNNER_TEMP/media/paypal-${{ github.run_id }}; mkdir -p "$out"; i=0
           for f in $(ls -tr "$RUNNER_TEMP"/rec/*.webm); do i=$((i+1))
             ffmpeg -nostdin -y -loglevel error -i "$f" -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -r 30 "$out/owner-$i.mp4"; done
-          cp "$GITHUB_STEP_SUMMARY" "$out/summary.md" 2>/dev/null || true
+          cp "$RUNNER_TEMP"/rec/*.log "$out/" 2>/dev/null || true
           cd "$RUNNER_TEMP/media"
           git init -q -b demo-media && git add . 
           git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com commit -qm "PayPal demo recordings, run ${{ github.run_id }}"
