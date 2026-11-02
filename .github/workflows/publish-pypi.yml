@@ -1,0 +1,28 @@
+name: publish-pypi
+# Publishes clients/python as the `gram402` package via PyPI trusted publishing (no token).
+# One-time owner step on pypi.org: Your projects -> Publishing -> Add a pending publisher:
+#   project gram402, owner miinimal, repository gram402, workflow publish-pypi.yml, environment pypi.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["py-v*"]
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install build && python -m build clients/python --outdir dist
+      - run: python -m venv /tmp/v && /tmp/v/bin/pip install dist/*.whl && cd /tmp && /tmp/v/bin/python -I -c "import paypal_mandate, near_mandate, gram402"
+      - uses: actions/upload-artifact@v4
+        with: {name: dist, path: dist}
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions: {id-token: write}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {name: dist, path: dist}
+      - uses: pypa/gh-action-pypi-publish@release/v1
