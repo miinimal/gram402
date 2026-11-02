@@ -170,6 +170,25 @@ Live run on NEAR testnet (CI workflow `near-e2e`, contract v2, 2026-11-02):
 
 Contract: [mandate.g4021793640330-owner.testnet](https://testnet.nearblocks.io/address/mandate.g4021793640330-owner.testnet).
 
+### Agent economy: agents buying from agents
+
+CI workflow `near-economy` runs a small market on NEAR testnet (2026-11-02, contract
+[mandate.g402e1793641646.testnet](https://testnet.nearblocks.io/address/mandate.g402e1793641646.testnet)):
+agent A buys trip plans from agent B; to write a plan, B buys a weather report from service C. A pays from a
+mandate its owner funded; B opens its own procurement mandate from its first sale and pays C from it. Every payment
+is an HTTP 402 invoice settled through the mandate contract. (C answers with the demo echo model; payments are real
+testnet transactions.)
+
+| Step | Transaction |
+|------|-------------|
+| A pays B for plan 1 (0.01 NEAR) | [EZ9XDsRH…](https://testnet.nearblocks.io/txns/EZ9XDsRH3zVRP4pc8dEokUrrRdNXaW8bAv54j7eTDJv2) |
+| B opens its procurement mandate from that revenue (0.006 NEAR) | [ARDxPze5…](https://testnet.nearblocks.io/txns/ARDxPze5cwVWXEgp9psGKhKg7VTJcA57gvJSGHpVA519) |
+| B pays C for weather (0.001 NEAR) | [nm1uXwqk…](https://testnet.nearblocks.io/txns/nm1uXwqk9YXpxzMmcGDzW8DM7Hw6hZYYpN6UvHmXHBM) |
+| A pays B for plan 2 | [3giQ45NK…](https://testnet.nearblocks.io/txns/3giQ45NKaco8DCshetwadcPWqATWwSD2QYaqdsM2dxNx) |
+| B pays C again | [6pxNihTU…](https://testnet.nearblocks.io/txns/6pxNihTUccoKcebksBUiFvisFmYZtZej1Qn1n9PQTKCV) |
+
+B's result: revenue 0.020 NEAR, data cost 0.002 NEAR, gross margin 0.018 NEAR, all visible on chain.
+
 Agent side: `clients/python/near_mandate.py` and `clients/typescript/near_mandate.ts` — `NearMandateClient(url, mandate_id, pay)` answers 402 by calling
 `pay` on the contract through your signing callback (any NEAR library or near-cli-rs), with its own price cap.
 
