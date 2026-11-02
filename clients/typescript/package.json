@@ -1,0 +1,20 @@
+{
+  "name": "gram402",
+  "version": "0.1.0",
+  "description": "HTTP 402 payments for AI agents: GRAM on TON, PayPal spending mandates, NEAR mandate contracts. Clients and merchant paywalls, no dependencies.",
+  "license": "MIT",
+  "author": "Aleksandr Shcherbakov (https://github.com/miinimal)",
+  "homepage": "https://github.com/miinimal/gram402",
+  "repository": {"type": "git", "url": "git+https://github.com/miinimal/gram402.git", "directory": "clients/typescript"},
+  "keywords": ["x402", "http-402", "ai-agents", "payments", "paypal", "near", "ton", "agentic-commerce"],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {".": {"types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs"}},
+  "files": ["dist", "README.md"],
+  "engines": {"node": ">=18"},
+  "scripts": {
+    "build": "npx -y esbuild@0.24.0 index.ts --bundle --platform=neutral --format=esm --outfile=dist/index.js && npx -y esbuild@0.24.0 index.ts --bundle --platform=node --format=cjs --outfile=dist/index.cjs && npx -y -p typescript@5.6.3 tsc globals.d.ts index.ts --declaration --emitDeclarationOnly --noCheck --target es2020 --module es2020 --moduleResolution node --lib es2020,dom --outDir dist"
+  }
+}

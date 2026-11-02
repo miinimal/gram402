@@ -1,0 +1,23 @@
+name: publish-npm
+# Publishes clients/typescript as the `gram402` npm package with npm trusted publishing (OIDC, no token).
+# One-time owner step on npmjs.com: create the package's trusted publisher (GitHub Actions, owner miinimal,
+# repository gram402, workflow publish-npm.yml). Until then the job stops at the publish step.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["npm-v*"]
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    defaults: {run: {working-directory: clients/typescript}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: "22", registry-url: "https://registry.npmjs.org"}
+      - run: npm install -g npm@latest
+      - run: npm run build
+      - run: node -e "require('./dist/index.cjs').MandateClient || process.exit(1)"
+      - run: npm publish --provenance --access public
