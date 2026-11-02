@@ -98,6 +98,27 @@ An agent pays any such endpoint with the client: `Gram402Client(base, pay=...).c
 A key comes from `POST https://ai.minimalcult.org/v1/agents/onboard`; top it up for fees with the returned
 `top_up` comment.
 
+## PayPal mandates: agents pay with PayPal, within limits the owner set once
+
+The same 402 endpoint also accepts PayPal. The agent's owner approves a spending mandate once on PayPal: total
+budget, cap per request, expiry, allowed endpoints. From then on the agent pays each request on its own, gets the
+answer with a signed receipt bound to the PayPal capture, and is stopped the moment a limit would be exceeded. The
+owner can check or revoke the mandate at any time.
+
+```bash
+pip install -r server/requirements.txt
+python3 demo/paypal_agent_demo.py        # simulated PayPal, no account needed
+PAYPAL_CLIENT_ID=... PAYPAL_CLIENT_SECRET=... python3 demo/paypal_agent_demo.py   # live PayPal sandbox
+```
+
+| Piece | File |
+|-------|------|
+| Server rail (Vault v3 mandates, Orders v2 captures, limits, idempotency) | `server/paypal402.py` |
+| Agent client with a price cap | `clients/python/paypal_mandate.py` |
+| MCP server: any MCP agent can pay from the mandate (`mandate_status`, `paid_chat`, `paid_call`) | `clients/python/mandate_mcp.py` |
+| Protocol | `SPEC.md`, section "PayPal mandate rail" |
+| Tests (fake PayPal API) and a live sandbox check in CI | `server/test_paypal.py`, `server/smoke_paypal_sandbox.py` |
+
 ## Security
 
 - Transfer comments are public on chain, so the invoice id never settles alone: the private `secret` is required.

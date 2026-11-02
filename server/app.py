@@ -19,6 +19,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 import pay402
+import paypal402
 import receipts
 
 DB = os.environ.get("GRAM402_DB", "gram402.db")
@@ -42,6 +43,7 @@ def h(k):
 with db() as _c:
     _c.execute("CREATE TABLE IF NOT EXISTS keys(key_hash TEXT PRIMARY KEY, owner TEXT, created INTEGER, balance_nano INTEGER)")
     pay402.setup_db(_c)
+    paypal402.setup_db(_c)
 
 
 def cost_nano(u):
@@ -71,7 +73,50 @@ async def answer(body):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "gram402": pay402.enabled(), "network": pay402.network_id(), "receipt_key": receipts.public_key_hex()}
+    return {"ok": True, "gram402": pay402.enabled(), "network": pay402.network_id(),
+            "paypal": paypal402.enabled() and paypal402.network_id(), "receipt_key": receipts.public_key_hex()}
+
+
+@app.post("/v1/mandates")
+async def mandate_create(request: Request):
+    """Owner side: create a PayPal spending mandate for an agent. Returns the secret once and the approval link."""
+    if not paypal402.enabled():
+        raise HTTPException(404, "PayPal rail is not configured")
+    b = await request.json()
+    with db() as c:
+        return await paypal402.create_mandate(c, b.get("budget_cents", 500), b.get("per_request_cents", 25),
+                                              b.get("days", 30), b.get("resources"))
+
+
+@app.get("/v1/mandates/{mid}/approved")
+async def mandate_approved(mid: str):
+    with db() as c:
+        r = await paypal402.activate(c, mid)
+    if not r["ok"]:
+        raise HTTPException(400, r["error"])
+    return {"mandate": mid, "status": "active", "message": "Mandate approved. Your agent can now pay within its limits."}
+
+
+@app.get("/v1/mandates/{mid}/cancelled")
+def mandate_cancelled(mid: str):
+    return {"mandate": mid, "status": "pending", "message": "Approval cancelled on PayPal; nothing was charged."}
+
+
+@app.get("/v1/mandates/{mid}")
+def mandate_status(mid: str, x_mandate_secret: str = Header(None)):
+    with db() as c:
+        r = paypal402.status(c, mid, x_mandate_secret)
+    if not r:
+        raise HTTPException(404, "unknown mandate or wrong secret")
+    return r
+
+
+@app.delete("/v1/mandates/{mid}")
+def mandate_revoke(mid: str, x_mandate_secret: str = Header(None)):
+    with db() as c:
+        if not paypal402.revoke(c, mid, x_mandate_secret):
+            raise HTTPException(404, "unknown mandate or wrong secret")
+    return {"mandate": mid, "status": "revoked"}
 
 
 @app.post("/v1/receipts/verify")
@@ -90,13 +135,22 @@ async def chat(request: Request, authorization: str = Header(None)):
     if authorization and authorization.lower().startswith("bearer "):
         key_hash = h(authorization[7:].strip())
     else:
-        if not pay402.enabled():
+        if not pay402.enabled() and not paypal402.enabled():
             raise HTTPException(401, "missing bearer key")
         xp = request.headers.get("x-payment")
         if not xp:
+            res = "/v1/chat/completions"
             with db() as c:
-                inv = pay402.create_invoice(c, pay402.quote_nano(body, cost_nano, 1.0), "/v1/chat/completions")
-            return JSONResponse(pay402.requirements(inv, "/v1/chat/completions"), status_code=402)
+                req = {"x402Version": 1, "error": "payment required", "accepts": []}
+                if pay402.enabled():
+                    req = pay402.requirements(pay402.create_invoice(c, pay402.quote_nano(body, cost_nano, 1.0), res), res)
+                if paypal402.enabled():
+                    req["accepts"].append(paypal402.accept(
+                        paypal402.create_invoice(c, paypal402.PRICE_CENTS, res), res))
+            return JSONResponse(req, status_code=402)
+        pclaim = paypal402.parse_header(xp) if paypal402.enabled() else None
+        if pclaim:
+            return await chat_paypal(body, pclaim)
         claim = pay402.parse_header(xp)
         if not claim:
             return JSONResponse({"x402Version": 1, "error": "malformed X-PAYMENT header"}, status_code=400)
@@ -140,3 +194,21 @@ async def chat(request: Request, authorization: str = Header(None)):
                                       "paid_nano": settlement["paid_nano"], "api_key": settlement["api_key"]}
         headers["X-PAYMENT-RESPONSE"] = pay402.response_header(settlement, charged, left)
     return JSONResponse(resp, headers=headers)
+
+
+async def chat_paypal(body, claim):
+    """Pay-per-request from a PayPal mandate: capture first, then answer; the receipt binds the PayPal capture."""
+    with db() as c:
+        st = await paypal402.settle(c, claim)
+    if not st["ok"]:
+        return JSONResponse({"x402Version": 1, "error": st["error"]}, status_code=402)
+    pay = {"network": st["network"], "transaction": st["transaction"], "payer": st["payer"], "charged_nano": None,
+           "charged_cents": st["charged_cents"], "currency": paypal402.CURRENCY}
+    try:
+        resp = await answer(body)
+    except HTTPException as e:
+        return JSONResponse({"error": {"message": e.detail}, "payment": pay}, status_code=e.status_code)
+    resp["gram402"] = {"charged_cents": st["charged_cents"], "mandate_left_cents": st["mandate_left_cents"],
+                       "receipt": receipts.make(body, resp, "upstream" if UPSTREAM else "echo", None, pay),
+                       "payment": pay}
+    return JSONResponse(resp, headers={"X-PAYMENT-RESPONSE": paypal402.response_header(st)})
