@@ -202,6 +202,7 @@ assert r.status_code == 200 and "Agent spending mandates" in r.text
 m3 = cl.post("/v1/mandates", json={"budget_cents": 50, "per_request_cents": 10, "days": 1}).json()
 r = cl.get(f"/v1/mandates/{m3['mandate']}/approved", headers={"Accept": "text/html"})
 assert r.status_code == 200 and "Mandate approved" in r.text
+assert 'href="https://demo.example/mandates"' in r.text  # link follows PUBLIC_URL, also behind a path prefix
 r = cl.get("/v1/mandates/m_unknown/approved", headers={"Accept": "text/html"})
 assert "not activated" in r.text
 

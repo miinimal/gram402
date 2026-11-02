@@ -127,7 +127,7 @@ def _result_page(title, text, ok):
     return HTMLResponse(f"""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{title}</title><body style="margin:0;font:16px/1.5 system-ui,sans-serif;background:#f2f5f8;color:#0f1d2b">
 <main style="max-width:480px;margin:15vh auto 0;padding:0 16px"><h1 style="color:{color};font-size:24px">{title}</h1>
-<p>{text}</p><p><a href="/mandates" style="color:#0070e0">Check spending or revoke</a></p></main></body>""")
+<p>{text}</p><p><a href="{paypal402.PUBLIC_URL}/mandates" style="color:#0070e0">Check spending or revoke</a></p></main></body>""")
 
 
 def _wants_html(request):
