@@ -145,6 +145,29 @@ from gram402_merchant import Merchant                # clients/python
 app = paypal_paywall(app, {"/v1/weather": {"cents": 5, "nano": 50_000_000}}, gram=Merchant(api_key, pay_to))
 ```
 
+## NEAR mandates: limits enforced by a smart contract
+
+`near/contract` turns the mandate into a NEAR contract. The owner funds a mandate for an agent account with a cap per
+payment, an expiry and allowed merchants. The agent pays a 402 invoice by calling `pay` on the contract; the
+contract checks every limit and sends the money straight to the merchant, and the merchant's server verifies the
+payment with one view call (`get_payment`). Even a compromised agent cannot spend outside the limits: give it a
+function-call access key that may only call `pay`.
+
+Live run on NEAR testnet (CI workflow `near-e2e`, 2026-11-02):
+
+| Step | Transaction |
+|------|-------------|
+| Mandate created: 0.01 NEAR, cap 0.002 NEAR per payment, one merchant | [ChMEaX74…](https://testnet.nearblocks.io/txns/ChMEaX74F5PDwbt6NHduik8bagv3LgVUiyuZX9LqRqoW) |
+| Agent pays invoice 1, gets the answer with a signed receipt | [FfpbfALk…](https://testnet.nearblocks.io/txns/FfpbfALk1XARyZpS25HReaeEJ1f4NZM7kXFvN9YeJeRD) |
+| Agent pays invoice 2 | [3tW4urSh…](https://testnet.nearblocks.io/txns/3tW4urSh3ztPHxy5RE1Qttkk3JmfXm8ARWhQfp3Zoodj) |
+| Payment over the cap: refused by the contract ("amount exceeds the per-payment cap") | — |
+
+Contract: [mandate.g4021793638153-owner.testnet](https://testnet.nearblocks.io/address/mandate.g4021793638153-owner.testnet).
+Reproduce: `.github/workflows/near-e2e.yml` (fresh faucet accounts, deploy, mandate, agent payments).
+
+NEAR HACKATHON: work for the hackathon starts at baseline commit `5f3ba49`; see
+[the diff](https://github.com/miinimal/gram402/compare/5f3ba49...main). Built with AI coding assistance (Claude).
+
 ## Security
 
 - Transfer comments are public on chain, so the invoice id never settles alone: the private `secret` is required.
