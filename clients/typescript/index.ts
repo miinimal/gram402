@@ -7,3 +7,5 @@ export type { Settlement, Prices } from './gram402_merchant';
 export { MandateClient, PaymentError as PayPalPaymentError } from './paypal_mandate';
 export { NearMandateClient, PaymentError as NearPaymentError } from './near_mandate';
 export type { NearPay } from './near_mandate';
+export { checkAgent, verifyRecord, canon as registryCanon } from './minimalai_registry';
+export type { CheckOptions, Decision } from './minimalai_registry';

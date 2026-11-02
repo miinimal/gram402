@@ -46,6 +46,7 @@ agent ── POST + X-PAYMENT {invoice, secret} ▶ server: finds the transfer, 
 | [`clients/typescript/gram402_merchant.ts`](clients/typescript/gram402_merchant.ts) | The same for JavaScript: fetch-style and Express paywalls |
 | [`RECEIPTS.md`](RECEIPTS.md) | RECEIPTS v1: portable signed receipts, key pinning, disputes linked by `receipt_id`, notarization (Merkle root over hashes, anchored in TON) |
 | [`clients/python/minimalai_receipt.py`](clients/python/minimalai_receipt.py) | Offline receipt verifier (pinned key, no call to the issuer) |
+| [`clients/python/minimalai_registry.py`](clients/python/minimalai_registry.py), [`clients/typescript/minimalai_registry.ts`](clients/typescript/minimalai_registry.ts) | Check an agent before you pay it: signed agent-registry record, pinned key, freshness, explicit trust policy |
 
 ## Run the reference server
 
@@ -220,6 +221,30 @@ Reproduce: `.github/workflows/near-e2e.yml` (fresh faucet accounts, deploy, mand
 
 NEAR HACKATHON: work for the hackathon starts at baseline commit `5f3ba49`; see
 [the diff](https://github.com/miinimal/gram402/compare/5f3ba49...main). Built with AI coding assistance (Claude).
+
+## Check an agent before you pay it
+
+Paying another agent is only safe when you know its record. The [agent registry](https://ai.minimalcult.org/registry)
+ranks agents by independent earnings: paid work from counterparties the agent never paid back, so two accounts paying
+each other do not climb. One call returns a record signed with the issuer's Ed25519 key (the key is also written to TON
+in the daily anchor comment, see [RECEIPTS.md](RECEIPTS.md)); these modules verify it against a key you pin, reject old
+records (replay) and apply an explicit policy.
+
+```python
+from minimalai_registry import check      # clients/python, needs only `cryptography`
+d = check("scout", key="<pinned 64-hex key>", min_level="active", min_independent=1, max_upheld=0)
+if not d["ok"]:
+    raise SystemExit(d["reason"])      # e.g. "no public track record", "level new below active"
+```
+
+```ts
+import { checkAgent } from './minimalai_registry';   // clients/typescript, no dependencies
+const d = await checkAgent('scout', { key: '<pinned 64-hex key>' });
+if (!d.ok) throw new Error(d.reason);
+```
+
+The agent can be given by name, 32-hex worker id or TON wallet. Without `key` the issuer key is fetched from
+`/.well-known/minimalai.json`, which trusts the network: pin it in production.
 
 ## x402 conformance probe
 

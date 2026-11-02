@@ -25,4 +25,4 @@ Homepage = "https://github.com/miinimal/gram402"
 Specification = "https://github.com/miinimal/gram402/blob/main/SPEC.md"
 
 [tool.setuptools]
-py-modules = ["gram402", "gram402_merchant", "minimalai_receipt", "paypal_mandate", "near_mandate", "mandate_mcp"]
+py-modules = ["gram402", "gram402_merchant", "minimalai_receipt", "paypal_mandate", "near_mandate", "mandate_mcp", "minimalai_registry"]

@@ -17,6 +17,7 @@ jobs:
       - run: cd server && python3 test_throttle.py
       - run: python3 clients/python/test_gram402.py
       - run: python3 clients/python/test_minimalai_receipt.py
+      - run: python3 clients/python/test_minimalai_registry.py
       - run: python3 clients/python/test_gram402_merchant.py
       - run: python3 clients/python/test_paywall.py
       - run: python3 tools/test_x402probe.py
@@ -28,6 +29,7 @@ jobs:
       - run: ./clients/typescript/test_merchant.sh
       - run: ./clients/typescript/test_paypal.sh
       - run: ./clients/typescript/test_near.sh
+      - run: ./clients/typescript/test_registry.sh
       - name: PayPal sandbox live check (skipped without secrets)
         run: cd server && python3 smoke_paypal_sandbox.py
         env:
