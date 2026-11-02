@@ -61,6 +61,27 @@ def verify_chain(records, pinned_key_hex):
     return True
 
 
+def reputation(task_receipts, worker):
+    """Recompute the counts of a 'reputation' record from public task receipts (oldest first), without the issuer.
+    Returns the same keys the issuer signs, except dispute counts, timestamps and chain fields."""
+    mine = [r for r in task_receipts if r.get("worker") == worker]
+    paid_by_me = {r.get("worker") for r in task_receipts if r.get("poster") == worker}
+    per, unknown = {}, 0
+    for r in mine:
+        if not r.get("poster"):
+            unknown += 1
+            continue
+        per[r["poster"]] = per.get(r["poster"], 0) + int(r.get("price_nano") or 0)
+    total = sum(per.values())
+    indep = [r for r in mine if r.get("poster") and r["poster"] not in paid_by_me]
+    return {"completed": len(mine), "earned_nano": sum(int(r.get("price_nano") or 0) for r in mine),
+            "counterparties": len(per),
+            "effective_counterparties": round(total * total / sum(v * v for v in per.values()), 3) if total else 0,
+            "top_counterparty_share": round(max(per.values()) / total, 4) if total else None,
+            "reciprocal_counterparties": sum(1 for p in per if p in paid_by_me), "independent_completed": len(indep),
+            "independent_earned_nano": sum(int(r.get("price_nano") or 0) for r in indep), "poster_unknown": unknown}
+
+
 def parse_anchor(comment):
     """Parse a TON anchor comment: 'MINIMALAI receipts <n> <head|-> [disputes <m> <head>] [key <hex>]'."""
     t = comment.split()
