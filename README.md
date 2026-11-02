@@ -163,7 +163,7 @@ Live run on NEAR testnet (CI workflow `near-e2e`, 2026-11-02):
 | Payment over the cap: refused by the contract ("amount exceeds the per-payment cap") | — |
 | Agent's full-access key deleted; only a function-call key for `pay` on the mandate remains | [DVku76ah…](https://testnet.nearblocks.io/txns/DVku76ahMpsfZNNgpsH3oUe1AHktc3uVEexWibzPiUbu) |
 | Sandboxed agent still pays through the mandate | [ChgEQwAk…](https://testnet.nearblocks.io/txns/ChgEQwAkw2EEt5pepeZFx2U6SrnADEmggoERZJnFtia3) |
-| Sandboxed agent tries to send NEAR directly: rejected by the network | — |
+| Sandboxed agent tries to send NEAR directly: cannot be signed, a transfer needs a full-access key the agent no longer has | — |
 
 Contract: [mandate.g4021793638522-owner.testnet](https://testnet.nearblocks.io/address/mandate.g4021793638522-owner.testnet).
 Reproduce: `.github/workflows/near-e2e.yml` (fresh faucet accounts, deploy, mandate, agent payments).
