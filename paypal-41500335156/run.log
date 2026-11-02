@@ -1,0 +1,24 @@
+
+[setup] PayPal: SIMULATED (no credentials given); server http://localhost:8402
+
+[owner] Resuming mandate m_c86fe092775a2a24
+
+[owner] Approved. From now on the agent pays on its own, within the limits.
+
+[agent] Asking: What is GRAM-402?
+
+[agent] Answer: echo: What is GRAM-402?
+        Paid 10 cents via PayPal, capture CAP1, budget left 15 cents, receipt signature valid: True
+
+[agent] Asking: Summarize the TON blockchain in one line.
+
+[agent] Answer: echo: Summarize the TON blockchain in one line.
+        Paid 10 cents via PayPal, capture CAP2, budget left 5 cents, receipt signature valid: True
+
+[agent] Asking: One more question, please.
+
+[agent] Stopped by the mandate: HTTP 402: {"x402Version": 1, "error": "mandate budget exhausted"}
+
+[owner] Mandate status: spent 20 of 25 cents. Revoking it.
+
+[agent] After revoke: HTTP 402: {"x402Version": 1, "error": "mandate is revoked"}
