@@ -114,7 +114,8 @@ PAYPAL_CLIENT_ID=... PAYPAL_CLIENT_SECRET=... python3 demo/paypal_agent_demo.py 
 | Piece | File |
 |-------|------|
 | Server rail (Vault v3 mandates, Orders v2 captures, limits, idempotency) | `server/paypal402.py` |
-| Agent client with a price cap | `clients/python/paypal_mandate.py` |
+| Agent clients with a price cap | `clients/python/paypal_mandate.py`, `clients/typescript/paypal_mandate.ts` |
+| Owner page: create, approve, spending meter, revoke | `GET /mandates` (`server/static/owner.html`) |
 | MCP server: any MCP agent can pay from the mandate (`mandate_status`, `paid_chat`, `paid_call`) | `clients/python/mandate_mcp.py` |
 | Protocol | `SPEC.md`, section "PayPal mandate rail" |
 | Tests (fake PayPal API) and a live sandbox check in CI | `server/test_paypal.py`, `server/smoke_paypal_sandbox.py` |
