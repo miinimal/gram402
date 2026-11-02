@@ -157,12 +157,15 @@ Live run on NEAR testnet (CI workflow `near-e2e`, 2026-11-02):
 
 | Step | Transaction |
 |------|-------------|
-| Mandate created: 0.01 NEAR, cap 0.002 NEAR per payment, one merchant | [ChMEaX74…](https://testnet.nearblocks.io/txns/ChMEaX74F5PDwbt6NHduik8bagv3LgVUiyuZX9LqRqoW) |
-| Agent pays invoice 1, gets the answer with a signed receipt | [FfpbfALk…](https://testnet.nearblocks.io/txns/FfpbfALk1XARyZpS25HReaeEJ1f4NZM7kXFvN9YeJeRD) |
-| Agent pays invoice 2 | [3tW4urSh…](https://testnet.nearblocks.io/txns/3tW4urSh3ztPHxy5RE1Qttkk3JmfXm8ARWhQfp3Zoodj) |
+| Mandate created: 0.01 NEAR, cap 0.002 NEAR per payment, one merchant | [3aux4eL8…](https://testnet.nearblocks.io/txns/3aux4eL83GbEJbzZkgcYtVoqCxMK7Nax9wGnK65K7Nob) |
+| Agent pays invoice 1, gets the answer with a signed receipt | [5Bw3geXM…](https://testnet.nearblocks.io/txns/5Bw3geXMC9Z3wcy8T4XQsbJLC2L18hmDt2Z8MetNCFbZ) |
+| Agent pays invoice 2 | [9Yut41uR…](https://testnet.nearblocks.io/txns/9Yut41uR5sRD6uNHVpMYDPKG67kSmcsr7dZ2XTtRY6Pi) |
 | Payment over the cap: refused by the contract ("amount exceeds the per-payment cap") | — |
+| Agent's full-access key deleted; only a function-call key for `pay` on the mandate remains | [DVku76ah…](https://testnet.nearblocks.io/txns/DVku76ahMpsfZNNgpsH3oUe1AHktc3uVEexWibzPiUbu) |
+| Sandboxed agent still pays through the mandate | [ChgEQwAk…](https://testnet.nearblocks.io/txns/ChgEQwAkw2EEt5pepeZFx2U6SrnADEmggoERZJnFtia3) |
+| Sandboxed agent tries to send NEAR directly: rejected by the network | — |
 
-Contract: [mandate.g4021793638153-owner.testnet](https://testnet.nearblocks.io/address/mandate.g4021793638153-owner.testnet).
+Contract: [mandate.g4021793638522-owner.testnet](https://testnet.nearblocks.io/address/mandate.g4021793638522-owner.testnet).
 Reproduce: `.github/workflows/near-e2e.yml` (fresh faucet accounts, deploy, mandate, agent payments).
 
 NEAR HACKATHON: work for the hackathon starts at baseline commit `5f3ba49`; see
