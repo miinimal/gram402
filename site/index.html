@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GRAM-402 Mandates</title>
+<meta name="description" content="AI agents that pay for APIs with PayPal or GRAM, within limits their owner set once. Open source HTTP 402 payments.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: receipt-tape column — hero, live simulator (owner panel + agent log), how it works, code, links */
+:root{--bg:#f2f5f8;--card:#fff;--fg:#0f1d2b;--muted:#5b6c7c;--line:#d9e2ea;--accent:#0070e0;--accent-ink:#fff;--gram:#0098ea;--ok:#16834a;--warn:#b5361f;--meter:#e3eaf0;--code:#0f1d2b;--code-fg:#dbe7f2;
+--display:"Manrope",system-ui,-apple-system,"Segoe UI",sans-serif;--mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0a1219;--card:#111c27;--fg:#e5edf4;--muted:#91a3b4;--line:#21303e;--accent:#4aa3ff;--accent-ink:#06121e;--gram:#38b6ff;--ok:#4cc382;--warn:#ff8a72;--meter:#1c2a37;--code:#060d13;--code-fg:#cfe0ee;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0a1219;--card:#111c27;--fg:#e5edf4;--muted:#91a3b4;--line:#21303e;--accent:#4aa3ff;--accent-ink:#06121e;--gram:#38b6ff;--ok:#4cc382;--warn:#ff8a72;--meter:#1c2a37;--code:#060d13;--code-fg:#cfe0ee;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 var(--display)}
+.wrap{max-width:980px;margin:0 auto;padding-block:40px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:36px}
+.eyebrow{font:600 12px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+h1{font-size:clamp(32px,6vw,56px);line-height:1.05;font-weight:800;letter-spacing:-.02em;margin:8px 0 14px;text-wrap:balance;max-width:20ch}
+h2{font-size:24px;font-weight:800;margin:0 0 6px;text-wrap:balance}
+p{margin:0;max-width:65ch}
+.lead{font-size:18px;color:var(--muted)}
+.status{font:500 13px var(--mono);color:var(--muted);margin-top:14px}
+.cta{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+a.btn{font:700 15px var(--display);padding:11px 16px;border-radius:10px;text-decoration:none;background:var(--accent);color:var(--accent-ink)}
+a.btn.alt{background:transparent;color:var(--fg);border:1px solid var(--line)}
+a{color:var(--accent)}
+a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sim{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:16px}
+@media (max-width:760px){.sim{grid-template-columns:1fr}}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.panel h3{margin:0;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.lim{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+label{display:flex;flex-direction:column;gap:3px;font-size:13px;color:var(--muted)}
+input{font:600 15px var(--mono);padding:9px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--fg);width:100%;min-width:0}
+button{font:700 14px var(--display);border:0;border-radius:9px;padding:10px 14px;background:var(--accent);color:var(--accent-ink);cursor:pointer}
+button.ghost{background:transparent;border:1px solid var(--warn);color:var(--warn)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.btns{display:flex;gap:8px;flex-wrap:wrap}
+.meter{height:10px;border-radius:6px;background:var(--meter);overflow:hidden}
+.meter i{display:block;height:100%;width:0;background:var(--accent);transition:width .35s}
+.figs{display:flex;justify-content:space-between;font:500 13px var(--mono);font-variant-numeric:tabular-nums}
+.pill{font:700 11px var(--display);padding:2px 8px;border-radius:99px;border:1px solid currentColor;text-transform:uppercase;letter-spacing:.05em}
+.s-none{color:var(--muted)}.s-active{color:var(--ok)}.s-revoked{color:var(--warn)}
+.log{font:13px/1.55 var(--mono);background:var(--code);color:var(--code-fg);border-radius:12px;padding:14px;min-height:300px;max-height:420px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+.log .a{color:#7cc4ff}.log .o{color:#ffd27a}.log .s{color:#7ee2a8}.log .x{color:#ff9b8a}.log .d{color:#8aa0b4}
+.steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;counter-reset:s}
+@media (max-width:760px){.steps{grid-template-columns:1fr 1fr}}
+@media (max-width:420px){.steps{grid-template-columns:1fr}}
+.step{border-top:2px solid var(--accent);padding-top:10px;min-width:0}
+.step b{display:block;font-size:15px;margin-bottom:4px}
+.step span{color:var(--muted);font-size:14px}
+.rails{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:560px){.rails{grid-template-columns:1fr}}
+.rail{border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--card)}
+.rail b{font-family:var(--mono)}
+pre.code{margin:0;font:13px/1.55 var(--mono);background:var(--code);color:var(--code-fg);padding:14px;border-radius:12px;overflow-x:auto}
+footer{color:var(--muted);font-size:14px;border-top:1px solid var(--line);padding-top:18px}
+@media (prefers-reduced-motion:reduce){.meter i{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">HTTP 402 · PayPal · GRAM on TON · open source</div>
+    <h1>Your AI agent pays for itself. Never more than you allowed.</h1>
+    <p class="lead">An agent hits a paid API and gets HTTP 402. Instead of stopping for a human, it pays from a PayPal mandate you approved once, or with GRAM, and gets the answer with a signed receipt. Every limit is enforced by the server, not by the model.</p>
+    <div class="cta">
+      <a class="btn" href="#try">Try the simulator</a>
+      <a class="btn alt" href="https://github.com/miinimal/gram402">Source on GitHub</a>
+    </div>
+    <p class="status">MIT license · server, Python and TypeScript clients, MCP server, tests in CI</p>
+  </header>
+
+  <section id="try">
+    <h2>Try it: you are the owner, the agent is on its own</h2>
+    <p class="lead" style="margin-bottom:14px">This simulator runs in your browser and follows the real protocol messages. The repository runs the same flow against the PayPal sandbox.</p>
+    <div class="sim">
+      <div class="panel">
+        <h3>Owner</h3>
+        <div class="lim">
+          <label for="b">Budget, cents<input id="b" inputmode="numeric" value="25"></label>
+          <label for="c">Max per request<input id="c" inputmode="numeric" value="10"></label>
+        </div>
+        <div class="btns"><button id="approve" type="button">Approve on PayPal</button><button id="revoke" class="ghost" type="button" disabled>Revoke</button></div>
+        <div class="figs"><span class="pill s-none" id="st">no mandate</span><span id="left">—</span></div>
+        <div class="meter" aria-hidden="true"><i id="bar"></i></div>
+        <h3 style="margin-top:6px">Agent</h3>
+        <label for="price">Price of the API, cents<input id="price" inputmode="numeric" value="10"></label>
+        <div class="btns"><button id="ask" type="button">Agent calls the API</button><button id="reset" class="ghost" type="button" style="border-color:var(--line);color:var(--fg)">Reset</button></div>
+      </div>
+      <div class="log" id="log" aria-live="polite"><span class="d">// Approve a mandate, then let the agent call the API.</span>
+</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>How it works</h2>
+    <div class="steps" style="margin-top:12px">
+      <div class="step"><b>1 · Mandate</b><span>The owner sets a budget, a cap per request, an expiry and allowed endpoints, and approves once on PayPal (Vault v3).</span></div>
+      <div class="step"><b>2 · 402</b><span>The agent calls a paid endpoint and receives an x402 offer: pay with GRAM or from the PayPal mandate.</span></div>
+      <div class="step"><b>3 · Pay</b><span>The server checks every limit, reserves the amount and captures a PayPal order with an idempotency key.</span></div>
+      <div class="step"><b>4 · Receipt</b><span>The answer comes with an Ed25519-signed receipt bound to the PayPal capture id. Revoke at any moment.</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>One 402, two rails</h2>
+    <div class="rails" style="margin-top:12px">
+      <div class="rail"><b>paypal-mandate</b><p>For agents whose owner pays with PayPal. Limits are held by the server; the model never sees the PayPal account.</p></div>
+      <div class="rail"><b>ton-transfer</b><p>For agents with a TON wallet: a plain GRAM transfer with the invoice comment, verified on chain, no facilitator.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Sell your API to agents in one line</h2>
+    <pre class="code" style="margin-top:12px">from paypal_paywall import paypal_paywall
+app = paypal_paywall(app, {"/v1/weather": {"cents": 5, "nano": 50_000_000}}, gram=Merchant(key, wallet))</pre>
+    <p class="lead" style="margin-top:10px">Agents in Claude, ChatGPT or any MCP client pay through <code>mandate_mcp.py</code>: tools <code>mandate_status</code>, <code>paid_chat</code>, <code>paid_call</code>.</p>
+  </section>
+
+  <footer>GRAM-402 · open source (MIT) · <a href="https://github.com/miinimal/gram402">github.com/miinimal/gram402</a> · Spec: <a href="https://github.com/miinimal/gram402/blob/main/SPEC.md">SPEC.md</a></footer>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+let M=null,inv=0,cap=0;
+const esc=s=>s.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+function out(cls,txt){$("log").insertAdjacentHTML("beforeend",`<span class="${cls}">${esc(txt)}</span>\n`);$("log").scrollTop=1e9}
+const hex=n=>[...crypto.getRandomValues(new Uint8Array(n))].map(b=>b.toString(16).padStart(2,"0")).join("");
+function draw(){
+  if(!M){$("st").textContent="no mandate";$("st").className="pill s-none";$("left").textContent="—";$("bar").style.width="0";return}
+  $("st").textContent=M.status;$("st").className="pill s-"+M.status;
+  $("left").textContent=`spent ${M.spent} / ${M.budget}¢`;$("bar").style.width=Math.min(100,100*M.spent/M.budget)+"%";
+  $("revoke").disabled=M.status!=="active";
+}
+$("approve").onclick=()=>{
+  const b=parseInt($("b").value,10),c=parseInt($("c").value,10);
+  if(!(b>0&&c>0&&c<=b)){out("x","owner: budget and cap must be positive, cap ≤ budget");return}
+  M={id:"m_"+hex(8),budget:b,cap:c,spent:0,status:"active"};
+  out("o",`owner → POST /v1/mandates {budget_cents:${b}, per_request_cents:${c}}`);
+  out("o",`owner ✓ approved on PayPal · mandate ${M.id} is active`);draw();
+};
+$("revoke").onclick=()=>{if(!M)return;M.status="revoked";out("o",`owner → DELETE /v1/mandates/${M.id} · revoked`);draw()};
+$("reset").onclick=()=>{M=null;$("log").innerHTML='<span class="d">// Approve a mandate, then let the agent call the API.</span>\n';draw()};
+$("ask").onclick=()=>{
+  const price=parseInt($("price").value,10)||0, id="p_"+hex(8);
+  out("a",`agent → POST /v1/chat/completions`);
+  out("d",`server ← 402 accepts [ton-transfer, paypal-mandate ${price}¢ invoice ${id}]`);
+  if(!M){out("x","agent ✗ no mandate: waits for its owner");return}
+  out("a",`agent → retry with X-PAYMENT {scheme:"paypal-mandate", mandate:${M.id}, invoice:${id}}`);
+  const why=M.status!=="active"?"mandate is revoked":price>M.cap?"price exceeds the mandate's per-request cap":M.spent+price>M.budget?"mandate budget exhausted":null;
+  if(why){out("x",`server ← 402 ${why} · nothing charged`);return}
+  M.spent+=price;cap++;draw();
+  out("s",`server ✓ PayPal capture CAP-${hex(4).toUpperCase()} · ${price}¢ · ${M.budget-M.spent}¢ left`);
+  out("s",`server ← 200 answer + receipt {payment:{network:"paypal-sandbox", charged_cents:${price}}, sig: ed25519 ${hex(6)}…}`);
+};
+draw();
+</script>
+</body>
+</html>
