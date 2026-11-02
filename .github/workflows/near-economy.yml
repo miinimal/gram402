@@ -1,0 +1,37 @@
+name: near-economy
+# Agent economy on NEAR testnet: A buys plans from B, B buys data from C; both pay through mandates; B's P&L printed.
+on:
+  push:
+    branches: [main]
+    paths: ["near/e2e/economy*", ".github/workflows/near-economy.yml"]
+  workflow_dispatch:
+concurrency: {group: near-economy, cancel-in-progress: false}
+jobs:
+  economy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -r server/requirements.txt
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            near/contract/target
+          key: near-${{ hashFiles('near/contract/Cargo.toml') }}
+      - run: rustup target add wasm32-unknown-unknown
+      - name: install cargo-near and near-cli-rs
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/cargo-near/releases/latest/download/cargo-near-installer.sh | sh
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/near-cli-rs/releases/latest/download/near-cli-rs-installer.sh | sh
+      - name: build contract
+        working-directory: near/contract
+        run: cargo near build non-reproducible-wasm
+      - name: agent economy on testnet
+        run: WASM=$(ls $PWD/near/contract/target/near/*.wasm | head -1) bash near/e2e/economy.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: near-economy-log, path: economy.log}
