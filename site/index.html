@@ -55,6 +55,8 @@ button:disabled{opacity:.45;cursor:not-allowed}
 @media (max-width:560px){.rails{grid-template-columns:1fr}}
 .rail{border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--card)}
 .rail b{font-family:var(--mono)}
+ul.fixes{margin:10px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:6px;max-width:75ch}
+ul.fixes li{color:var(--fg)}
 pre.code{margin:0;font:13px/1.55 var(--mono);background:var(--code);color:var(--code-fg);padding:14px;border-radius:12px;overflow-x:auto}
 footer{color:var(--muted);font-size:14px;border-top:1px solid var(--line);padding-top:18px}
 @media (prefers-reduced-motion:reduce){.meter i{transition:none}}
@@ -112,6 +114,19 @@ footer{color:var(--muted);font-size:14px;border-top:1px solid var(--line);paddin
       <div class="rail"><b>paypal-mandate</b><p>For agents whose owner pays with PayPal. Limits are held by the server; the model never sees the PayPal account.</p></div>
       <div class="rail"><b>ton-transfer</b><p>For agents with a TON wallet: a plain GRAM transfer with the invoice comment, verified on chain, no facilitator.</p></div>
     </div>
+  </section>
+
+  <section>
+    <h2>Reviewed before we shipped it</h2>
+    <p class="lead" style="margin-top:6px">An independent security review of the payment code found 3 high and 4 medium issues. All are fixed, each with a test:</p>
+    <ul class="fixes">
+      <li>An invoice is bound to the endpoint and price it was issued for, so a cheap invoice cannot buy an expensive call.</li>
+      <li>PayPal: idempotency keys are bound to the mandate; a reservation is released only when PayPal refuses, so a timeout can never charge twice.</li>
+      <li>Paid but not served: the PayPal capture is refunded; on NEAR the same payment is honoured once more.</li>
+      <li>NEAR contract v2: payments add no contract state, so nobody can drain the contract through storage or squat invoice ids; failed transfers and refunds roll back.</li>
+      <li>Agent clients refuse to send the mandate secret to any host other than the configured one, even if the model asks.</li>
+      <li>Per-address limits on new mandates and on unpaid requests.</li>
+    </ul>
   </section>
 
   <section>
