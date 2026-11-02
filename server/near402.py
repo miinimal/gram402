@@ -1,14 +1,16 @@
 """NEAR rail for GRAM-402: agents pay 402 invoices through an on-chain mandate (near/contract).
 
 Scheme "near-mandate": the 402 offer names the mandate contract, the merchant account, the amount in yoctoNEAR and an
-invoice id. The agent calls `pay(mandate_id, merchant, amount, invoice, resource)` on the contract with its own
-NEAR account (ideally a function-call key limited to that method). The contract enforces the owner's limits and sends
-the money to the merchant. The agent then repeats the request with X-PAYMENT = base64 JSON {x402Version:1,
-scheme:"near-mandate", payload:{invoice, secret}}; the server reads `get_payment(invoice)` from the contract (view
-call, final finality) and checks merchant, amount and resource before answering.
+invoice id. The agent calls `pay(mandate_id, merchant, amount, invoice)` on the contract with its own NEAR account
+(ideally a function-call key limited to that method). The contract enforces the owner's limits, sends the money to
+the merchant and logs a `paid` event. The agent repeats the request with X-PAYMENT = base64 JSON {x402Version:1,
+scheme:"near-mandate", payload:{invoice, secret, tx_hash, sender}}; the server fetches that transaction (final) and
+requires a `paid` event emitted by the mandate contract for this invoice, this merchant and at least the price, with
+no failed receipt. A transaction settles at most one invoice.
 
-The invoice id is public on chain, so the private secret proves the claimant is the one who asked for the invoice
-(front-running guard, same as ton-transfer). Author: Aleksandr Shcherbakov (@miinimal).
+The invoice id is public, so the private secret proves the claimant asked for the invoice (front-running guard).
+If the answer fails after payment, the same X-PAYMENT is honoured once more without paying again.
+Author: Aleksandr Shcherbakov (@miinimal).
 """
 import base64
 import hashlib
@@ -46,7 +48,8 @@ def _h(s):
 def setup_db(c):
     c.executescript("""
     CREATE TABLE IF NOT EXISTS near_invoices(id TEXT PRIMARY KEY, secret_hash TEXT, created INTEGER, expires INTEGER,
-        amount_yocto TEXT, resource TEXT, status TEXT NOT NULL DEFAULT 'open', mandate_id INTEGER);
+        amount_yocto TEXT, resource TEXT, status TEXT NOT NULL DEFAULT 'open', mandate_id INTEGER, tx_hash TEXT);
+    CREATE UNIQUE INDEX IF NOT EXISTS near_invoices_tx ON near_invoices(tx_hash);
     """)
 
 
@@ -66,11 +69,10 @@ def accept(inv, resource):
             "description": "Pay through your NEAR spending mandate; limits are enforced by the contract.",
             "extra": {"invoice": inv["invoice"], "secret": inv["secret"], "contract": CONTRACT, "method": "pay",
                       "decimals": 24, "expiresAt": inv["expires"],
-                      "args": {"merchant": MERCHANT, "amount": str(inv["amount_yocto"]), "invoice": inv["invoice"],
-                               "resource": resource},
-                      "howTo": "call pay(mandate_id, merchant, amount, invoice, resource) on the contract, then repeat "
-                               "the request with X-PAYMENT = base64 JSON {x402Version:1, scheme:'near-mandate', "
-                               "payload:{invoice, secret}}"}}
+                      "args": {"merchant": MERCHANT, "amount": str(inv["amount_yocto"]), "invoice": inv["invoice"]},
+                      "howTo": "call pay(mandate_id, merchant, amount, invoice) on the contract, then repeat the "
+                               "request with X-PAYMENT = base64 JSON {x402Version:1, scheme:'near-mandate', "
+                               "payload:{invoice, secret, tx_hash, sender}}"}}
 
 
 def parse_header(value):
@@ -84,20 +86,53 @@ def parse_header(value):
     p = d.get("payload") or {}
     if not (p.get("invoice") and p.get("secret")):
         return None
-    return {"invoice": str(p["invoice"])[:64], "secret": str(p["secret"])[:128]}
+    return {"invoice": str(p["invoice"])[:64], "secret": str(p["secret"])[:128],
+            "tx_hash": str(p.get("tx_hash") or "")[:64], "sender": str(p.get("sender") or "")[:64]}
 
 
-async def view(method, args):
-    body = {"jsonrpc": "2.0", "id": "g402", "method": "query", "params": {
-        "request_type": "call_function", "finality": "final", "account_id": CONTRACT, "method_name": method,
-        "args_base64": base64.b64encode(json.dumps(args).encode()).decode()}}
-    async with httpx.AsyncClient(timeout=20, transport=_transport) as cl:
-        r = await cl.post(RPC, json=body)
+async def rpc(method, params):
+    async with httpx.AsyncClient(timeout=30, transport=_transport) as cl:
+        r = await cl.post(RPC, json={"jsonrpc": "2.0", "id": "g402", "method": method, "params": params})
         r.raise_for_status()
         d = r.json()
-    if "error" in d or "error" in (d.get("result") or {}):
-        raise RuntimeError("near rpc: " + json.dumps(d.get("error") or d["result"].get("error"))[:200])
-    return json.loads(bytes(d["result"]["result"]).decode() or "null")
+    if "error" in d:
+        raise LookupError(json.dumps(d["error"])[:200])
+    return d["result"]
+
+
+def _events(outcome):
+    for line in outcome.get("logs") or []:
+        if line.startswith("EVENT_JSON:"):
+            try:
+                ev = json.loads(line[len("EVENT_JSON:"):])
+            except ValueError:
+                continue
+            if ev.get("standard") == "near-mandate":
+                yield ev
+
+
+def verify_tx(tx, invoice, amount_yocto):
+    """The transaction must hold a `paid` event from the mandate contract for this invoice and merchant, at least the
+    price, and no failed receipt (a failed transfer to the merchant is a failed receipt)."""
+    outcomes = tx.get("receipts_outcome") or []
+    if "Failure" in (tx.get("status") or {}) or any("Failure" in ((o.get("outcome") or {}).get("status") or {})
+                                                     for o in outcomes):
+        return "the payment transaction failed"
+    for o in outcomes:
+        out = o.get("outcome") or {}
+        if out.get("executor_id") != CONTRACT:
+            continue
+        for ev in _events(out):
+            if ev.get("event") == "pay_failed":
+                return "the transfer to the merchant failed"
+            if ev.get("event") != "paid":
+                continue
+            for d in ev.get("data") or []:
+                if d.get("invoice") == invoice and d.get("merchant") == MERCHANT:
+                    if int(d.get("amount", 0)) < int(amount_yocto):
+                        return "underpaid"
+                    return {"mandate_id": int(d.get("mandate_id", 0)), "amount": int(d["amount"])}
+    return "no payment for this invoice to this merchant in that transaction"
 
 
 async def settle(c, claim, now=None):
@@ -105,28 +140,41 @@ async def settle(c, claim, now=None):
     row = c.execute("SELECT * FROM near_invoices WHERE id=?", (claim["invoice"],)).fetchone()
     if not row or not secrets.compare_digest(row["secret_hash"], _h(claim["secret"])):
         return {"ok": False, "error": "unknown invoice or wrong secret"}
+    if row["status"] == "credit":  # paid earlier, answer failed: serve once more without a new payment
+        c.execute("UPDATE near_invoices SET status='paid' WHERE id=? AND status='credit'", (row["id"],))
+        return {"ok": True, "network": network_id(), "transaction": row["tx_hash"],
+                "payer": f"mandate:{row['mandate_id']}", "charged_yocto": int(row["amount_yocto"]), "invoice": row["id"]}
     if row["status"] != "open":
         return {"ok": False, "error": "invoice already settled"}
+    if not claim.get("tx_hash") or not claim.get("sender"):
+        return {"ok": False, "error": "X-PAYMENT must carry tx_hash and sender of the pay() transaction"}
+    if c.execute("SELECT 1 FROM near_invoices WHERE tx_hash=?", (claim["tx_hash"],)).fetchone():
+        return {"ok": False, "error": "this transaction already settled another invoice"}
     try:
-        p = await view("get_payment", {"invoice": claim["invoice"]})
+        tx = await rpc("tx", {"tx_hash": claim["tx_hash"], "sender_account_id": claim["sender"], "wait_until": "FINAL"})
+    except LookupError as e:
+        if now > row["expires"]:
+            return {"ok": False, "error": "invoice expired and the transaction was not found"}
+        return {"ok": False, "error": "transaction not found yet: " + str(e)[:100], "retry": True}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": "NEAR RPC unavailable: " + str(e)[:120], "retry": True}
-    if not p:
-        if now > row["expires"]:
-            return {"ok": False, "error": "invoice expired and no payment found"}
-        return {"ok": False, "error": "payment not found on chain yet; retry in a few seconds", "retry": True}
-    if p.get("merchant") != MERCHANT:
-        return {"ok": False, "error": "paid to another merchant"}
-    if int(p.get("amount", 0)) < int(row["amount_yocto"]):
-        return {"ok": False, "error": "underpaid"}
-    if (p.get("resource") or "") not in ("", row["resource"]):
-        return {"ok": False, "error": "payment is for another resource"}
-    cur = c.execute("UPDATE near_invoices SET status='paid', mandate_id=? WHERE id=? AND status='open'",
-                    (int(p.get("mandate_id", 0)), claim["invoice"]))
+    res = verify_tx(tx, claim["invoice"], row["amount_yocto"])
+    if isinstance(res, str):
+        return {"ok": False, "error": res}
+    try:
+        cur = c.execute("UPDATE near_invoices SET status='paid', mandate_id=?, tx_hash=? WHERE id=? AND status='open'",
+                        (res["mandate_id"], claim["tx_hash"], claim["invoice"]))
+    except Exception:  # noqa: BLE001  (unique tx_hash: a concurrent claim used the same transaction)
+        return {"ok": False, "error": "this transaction already settled another invoice"}
     if cur.rowcount != 1:
         return {"ok": False, "error": "invoice already settled"}
-    return {"ok": True, "network": network_id(), "transaction": f"{CONTRACT}/{claim['invoice']}",
-            "payer": f"mandate:{p.get('mandate_id')}", "charged_yocto": int(p["amount"])}
+    return {"ok": True, "network": network_id(), "transaction": claim["tx_hash"], "payer": f"mandate:{res['mandate_id']}",
+            "charged_yocto": res["amount"], "invoice": claim["invoice"]}
+
+
+def credit(c, invoice):
+    """The answer failed after a verified payment: the same X-PAYMENT will be served once more."""
+    c.execute("UPDATE near_invoices SET status='credit' WHERE id=? AND status='paid'", (invoice,))
 
 
 def response_header(s):

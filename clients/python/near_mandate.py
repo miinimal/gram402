@@ -3,6 +3,7 @@
     from near_mandate import NearMandateClient
     def pay(contract, method, args):            # sign with the agent's NEAR key (any library or near-cli-rs)
         ...                                      # call `method` on `contract` with JSON `args`, 0 deposit, 30 Tgas
+        return {"tx_hash": tx_hash, "sender": agent_account}
     agent = NearMandateClient("https://api.example", mandate_id=1, pay=pay, max_yocto=10**22)
     answer = agent.chat({"model": "default", "messages": [{"role": "user", "content": "hi"}]})
 
@@ -62,9 +63,12 @@ class NearMandateClient:
         if price > self.max_yocto:
             raise PaymentError(f"price {price} yoctoNEAR exceeds max_yocto {self.max_yocto}")
         ex = acc["extra"]
-        self.pay(ex["contract"], ex.get("method", "pay"), {"mandate_id": self.mandate_id, **ex["args"]})
+        tx = self.pay(ex["contract"], ex.get("method", "pay"), {"mandate_id": self.mandate_id, **ex["args"]}) or {}
+        if not tx.get("tx_hash") or not tx.get("sender"):
+            raise PaymentError("pay callback must return {'tx_hash', 'sender'} of the pay() transaction")
         xpay = base64.b64encode(json.dumps({"x402Version": 1, "scheme": SCHEME, "payload": {
-            "invoice": ex["invoice"], "secret": ex["secret"]}}).encode()).decode()
+            "invoice": ex["invoice"], "secret": ex["secret"], "tx_hash": tx["tx_hash"],
+            "sender": tx["sender"]}}).encode()).decode()
         deadline = time.time() + self.wait_s
         while True:
             st, hd, out = self._post(path, body, {"X-PAYMENT": xpay})

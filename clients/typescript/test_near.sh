@@ -8,17 +8,18 @@ DB=$(mktemp -d)
   python3 -c "
 import base64, json, httpx, uvicorn, app, near402
 from fastapi import Request
-PAID = {}
+TXS = {}
 def rpc(req):
-    p = json.loads(req.content)['params']
-    inv = json.loads(base64.b64decode(p['args_base64']))['invoice']
-    return httpx.Response(200, json={'jsonrpc': '2.0', 'id': 1, 'result': {'result': list(json.dumps(PAID.get(inv)).encode())}})
+    b = json.loads(req.content)
+    return httpx.Response(200, json={'jsonrpc': '2.0', 'id': 1, 'result': TXS[b['params']['tx_hash']]})
 near402._transport = httpx.MockTransport(rpc)
 @app.app.post('/_test/near_pay')
 async def near_pay(request: Request):
     a = await request.json()
-    PAID[a['invoice']] = {'mandate_id': a['mandate_id'], 'merchant': a['merchant'], 'amount': a['amount'], 'resource': a['resource']}
-    return {'ok': True}
+    ev = {'standard': 'near-mandate', 'event': 'paid', 'data': [{'mandate_id': a['mandate_id'], 'merchant': a['merchant'], 'amount': a['amount'], 'invoice': a['invoice']}]}
+    h = 'TSTX%d' % len(TXS)
+    TXS[h] = {'status': {'SuccessValue': ''}, 'receipts_outcome': [{'outcome': {'executor_id': 'mandate.gram402.testnet', 'logs': ['EVENT_JSON:' + json.dumps(ev)], 'status': {'SuccessValue': ''}}}]}
+    return {'tx': h}
 uvicorn.run(app.app, host='127.0.0.1', port=18404, log_level='warning')" ) & H=$!
 trap 'kill $H 2>/dev/null' EXIT
 for i in $(seq 1 40); do curl -sf -m 1 http://127.0.0.1:18404/health >/dev/null && break; sleep 0.5; done

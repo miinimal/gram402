@@ -272,7 +272,11 @@ async def chat_near(body, claim):
     try:
         resp = await answer(body)
     except HTTPException as e:
-        return JSONResponse({"error": {"message": e.detail}, "payment": pay}, status_code=e.status_code)
+        with db() as c:
+            near402.credit(c, st["invoice"])
+        return JSONResponse({"error": {"message": e.detail}, "payment": pay,
+                             "credit": "repeat the same X-PAYMENT once to get the answer without paying again"},
+                            status_code=e.status_code)
     resp["gram402"] = {"receipt": receipts.make(body, resp, "upstream" if UPSTREAM else "echo", None, pay),
                        "payment": pay}
     return JSONResponse(resp, headers={"X-PAYMENT-RESPONSE": near402.response_header(st)})

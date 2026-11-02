@@ -148,10 +148,13 @@ app = paypal_paywall(app, {"/v1/weather": {"cents": 5, "nano": 50_000_000}}, gra
 ## NEAR mandates: limits enforced by a smart contract
 
 `near/contract` turns the mandate into a NEAR contract. The owner funds a mandate for an agent account with a cap per
-payment, an expiry and allowed merchants. The agent pays a 402 invoice by calling `pay` on the contract; the
-contract checks every limit and sends the money straight to the merchant, and the merchant's server verifies the
-payment with one view call (`get_payment`). Even a compromised agent cannot spend outside the limits: give it a
-function-call access key that may only call `pay`.
+payment, an expiry and allowed merchants; the deposit also pays the mandate's own storage. The agent pays a 402
+invoice by calling `pay` on the contract; the contract checks every limit, sends the money straight to the merchant
+and logs a `paid` event. The merchant's server verifies the payment from that transaction (event from this
+contract, this invoice, this merchant, at least the price, no failed receipt); payments add no contract state, so
+nobody can make the contract pay for storage or squat invoice ids. A failed transfer puts the amount back into the
+mandate; a failed refund on revoke re-activates it. Even a compromised agent cannot spend outside the limits: give it
+a function-call access key that may only call `pay`.
 
 Live run on NEAR testnet (CI workflow `near-e2e`, 2026-11-02):
 

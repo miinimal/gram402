@@ -6,6 +6,7 @@ reference server verifies it with a view call on the contract. Author: Aleksandr
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -34,7 +35,9 @@ def near_pay(args):
     p = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
     out = p.stdout + p.stderr
     print(out[-1500:], flush=True)
-    return p.returncode == 0 and "Error" not in out.split("Transaction ID")[0][-400:], out
+    m = re.search(r"Transaction ID: ([1-9A-HJ-NP-Za-km-z]{32,64})", out)
+    ok = p.returncode == 0 and m is not None and "succeeded" in out
+    return ok, out, (m.group(1) if m else None)
 
 
 def one_round(label, amount_override=None):
@@ -45,11 +48,12 @@ def one_round(label, amount_override=None):
     if amount_override:
         args["amount"] = amount_override
     print(f"\n== {label}: 402 offer {acc['maxAmountRequired']} yocto, invoice {acc['extra']['invoice']}", flush=True)
-    ok, out = near_pay(args)
+    ok, out, tx = near_pay(args)
     if not ok:
         return False, out
+    print(f"== {label}: pay tx {tx}", flush=True)
     xpay = base64.b64encode(json.dumps({"x402Version": 1, "scheme": "near-mandate", "payload": {
-        "invoice": acc["extra"]["invoice"], "secret": acc["extra"]["secret"]}}).encode()).decode()
+        "invoice": acc["extra"]["invoice"], "secret": acc["extra"]["secret"], "tx_hash": tx, "sender": AGENT}}).encode()).decode()
     for _ in range(20):
         st, hd, out = post({"X-PAYMENT": xpay})
         if st == 402 and any(k.lower() == "retry-after" for k in hd):

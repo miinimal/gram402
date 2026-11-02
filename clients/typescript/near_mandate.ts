@@ -2,7 +2,8 @@
 //
 //   import { NearMandateClient } from './near_mandate';
 //   const agent = new NearMandateClient('https://api.example', 1, async (contract, method, args) => {
-//     await account.callFunction({ contractId: contract, methodName: method, args, gas: 30_000_000_000_000n });
+//     const out = await account.callFunction({ contractId: contract, methodName: method, args, gas: 30_000_000_000_000n });
+//     return { txHash: out.transaction.hash, sender: account.accountId };
 //   }, { maxYocto: 10n ** 22n });
 //   const answer = await agent.chat({ model: 'default', messages: [{ role: 'user', content: 'hi' }] });
 //
@@ -10,7 +11,7 @@
 // contract through your signing callback, then retries with X-PAYMENT until the payment is visible on chain.
 // Author: Aleksandr Shcherbakov (@miinimal).
 
-export type NearPay = (contract: string, method: string, args: Record<string, unknown>) => Promise<void>;
+export type NearPay = (contract: string, method: string, args: Record<string, unknown>) => Promise<{ txHash: string; sender: string }>;
 
 export class PaymentError extends Error {}
 
@@ -52,8 +53,10 @@ export class NearMandateClient {
     const price = BigInt(acc.maxAmountRequired);
     if (price > this.maxYocto) throw new PaymentError(`price ${price} yoctoNEAR exceeds maxYocto ${this.maxYocto}`);
     const ex = acc.extra;
-    await this.pay(ex.contract, ex.method || 'pay', { mandate_id: this.mandateId, ...ex.args });
-    const xpay = b64(JSON.stringify({ x402Version: 1, scheme: SCHEME, payload: { invoice: ex.invoice, secret: ex.secret } }));
+    const tx = await this.pay(ex.contract, ex.method || 'pay', { mandate_id: this.mandateId, ...ex.args });
+    if (!tx?.txHash || !tx?.sender) throw new PaymentError('pay callback must return { txHash, sender }');
+    const xpay = b64(JSON.stringify({ x402Version: 1, scheme: SCHEME,
+      payload: { invoice: ex.invoice, secret: ex.secret, tx_hash: tx.txHash, sender: tx.sender } }));
     const deadline = Date.now() + this.waitMs;
     for (;;) {
       r = await post({ 'X-PAYMENT': xpay });

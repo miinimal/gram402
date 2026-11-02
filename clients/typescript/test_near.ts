@@ -5,7 +5,8 @@ const BASE = 'http://127.0.0.1:18404';
 async function main() {
   const pay = async (contract: string, method: string, args: Record<string, unknown>) => {
     if (contract !== 'mandate.gram402.testnet' || method !== 'pay') throw new Error('bad call');
-    await fetch(`${BASE}/_test/near_pay`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
+    const r = await fetch(`${BASE}/_test/near_pay`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
+    return { txHash: (await r.json()).tx, sender: 'agent.testnet' };
   };
   const agent = new NearMandateClient(BASE, 7, pay, { maxYocto: 10n ** 21n, pollMs: 100 });
   const out = await agent.chat({ model: 'echo', messages: [{ role: 'user', content: 'hello from ts on near' }] });

@@ -23,7 +23,7 @@ PRICE=1000000000000000000000      # 0.001 NEAR per request
 CAP=2000000000000000000000        # cap 0.002 NEAR per payment
 near_tx contract call-function as-transaction "$CONTRACT" create_mandate \
   json-args "{\"agent\":\"$AGENT\",\"per_payment_cap\":\"$CAP\",\"valid_for_ms\":3600000,\"merchants\":[\"$MERCHANT\"]}" \
-  prepaid-gas '30 Tgas' attached-deposit '0.01 NEAR' sign-as "$OWNER"
+  prepaid-gas '30 Tgas' attached-deposit '0.02 NEAR' sign-as "$OWNER"
 
 ( cd server && GRAM402_DB=$(mktemp -d)/e2e.db PAY402_NETWORK=testnet PAY402_ADDRESS=0QDIl6cScCeTVp5GLmbbxh8blQLvRXd-0J4T1fVsz7uEVQ_U \
   NEAR_MANDATE_CONTRACT=$CONTRACT NEAR_MERCHANT=$MERCHANT NEAR_PRICE_YOCTO=$PRICE \

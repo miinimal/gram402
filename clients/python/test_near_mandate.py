@@ -19,8 +19,9 @@ def pay(contract, method, args):
     """Simulates the agent's signed call: the contract records the payment under the invoice id."""
     assert contract == "mandate.gram402.testnet" and method == "pay"
     CALLS.append(args)
-    T.PAID[args["invoice"]] = {"mandate_id": args["mandate_id"], "merchant": args["merchant"],
-                               "amount": args["amount"], "resource": args["resource"], "paid_at_ms": 1}
+    h = "PYTX%d" % len(CALLS)
+    T.TXS[h] = T.make_tx(args["invoice"], args["amount"], merchant=args["merchant"], mandate_id=args["mandate_id"])
+    return {"tx_hash": h, "sender": "agent.testnet"}
 
 
 class Resp:
