@@ -1,11 +1,17 @@
 name: ai-agent
-# The AI shopper demo with a real LLM: the model decides what to buy, the server enforces the PayPal mandate
-# (simulated PayPal API here). Any OpenAI-compatible endpoint: set repo secrets LLM_URL, LLM_KEY, LLM_MODEL.
-on: {workflow_dispatch: {}}
+# The AI shopper demo with a real LLM: the model decides what to buy, the server enforces the PayPal mandate.
+# Any OpenAI-compatible endpoint: repo secrets LLM_URL, LLM_KEY, LLM_MODEL. With input live=true the PayPal sandbox is
+# used (secrets PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET): open the approval link printed in the log, log in with a
+# sandbox buyer account and approve; the agent then shops on its own.
+on:
+  workflow_dispatch:
+    inputs:
+      live: {description: "use the live PayPal sandbox (needs approval in the log)", type: boolean, default: false}
 permissions: {contents: read}
 jobs:
   shopper:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -16,8 +22,13 @@ jobs:
           LLM_URL: ${{ secrets.LLM_URL }}
           LLM_KEY: ${{ secrets.LLM_KEY }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          PAYPAL_CLIENT_ID: ${{ inputs.live && secrets.PAYPAL_CLIENT_ID || '' }}
+          PAYPAL_CLIENT_SECRET: ${{ inputs.live && secrets.PAYPAL_CLIENT_SECRET || '' }}
+          PAYPAL_ENV: sandbox
+          PAYPAL_SANDBOX_ONLY: "1"
+          PYTHONUNBUFFERED: "1"
         run: |
           set -o pipefail
           if [ -z "$LLM_URL" ]; then echo "LLM_URL secret not set: skipped"; exit 0; fi
-          timeout 300 python3 demo/ai_shopper.py 2>&1 | tee shopper.log
+          timeout 1500 python3 demo/ai_shopper.py 2>&1 | tee shopper.log
           { echo '## AI shopper (real LLM)'; echo '```'; cat shopper.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

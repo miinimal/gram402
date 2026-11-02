@@ -137,6 +137,8 @@ def main():
                                  data=json.dumps({"budget_cents": 30, "per_request_cents": 15, "days": 1}).encode())
     m = json.loads(urllib.request.urlopen(req).read())
     print(f"[owner] mandate {m['mandate']}: 30 cents total, max 15 per call. Approve: {m['approve_url']}")
+    if LIVE and os.environ.get("GITHUB_ACTIONS"):
+        print(f"::notice title=Approve the PayPal sandbox mandate::{m['approve_url']}", flush=True)
     agent = MandateClient(BASE, m["mandate"], m["secret"], max_cents=100)  # the server holds the real limit
     if LIVE:
         while agent.status()["status"] != "active":
