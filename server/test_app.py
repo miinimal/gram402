@@ -80,5 +80,22 @@ def main():
     print("gram402 server OK")
 
 
+def test_upstream_body_pins_model_and_caps_output():
+    import app as A
+    old = (A.UPSTREAM_MODEL, A.UPSTREAM_MAX_TOKENS)
+    try:
+        A.UPSTREAM_MODEL, A.UPSTREAM_MAX_TOKENS = "", 0
+        assert A.upstream_body({"model": "x", "n": 3})["n"] == 3  # unpinned: passed through as before
+        A.UPSTREAM_MODEL, A.UPSTREAM_MAX_TOKENS = "cheap-model", 300
+        b = A.upstream_body({"model": "expensive", "messages": [], "max_tokens": 100000, "n": 3, "stream": True})
+        assert b == {"model": "cheap-model", "messages": [], "max_tokens": 300, "stream": False}
+        assert A.upstream_body({"messages": []})["max_tokens"] == 300
+        assert A.upstream_body({"messages": [], "max_tokens": 50})["max_tokens"] == 50
+    finally:
+        A.UPSTREAM_MODEL, A.UPSTREAM_MAX_TOKENS = old
+
+
 if __name__ == "__main__":
     main()
+    test_upstream_body_pins_model_and_caps_output()
+    print("upstream pin test ok")

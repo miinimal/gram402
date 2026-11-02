@@ -27,6 +27,23 @@ import throttle
 DB = os.environ.get("GRAM402_DB", "gram402.db")
 UPSTREAM = os.environ.get("UPSTREAM_URL", "").rstrip("/")
 UPSTREAM_KEY = os.environ.get("UPSTREAM_KEY", "")
+# Optional pins for a public deployment: one model, a reply-length cap, and only the request fields below go upstream,
+# so a caller cannot pick an expensive model or long output on the operator's key.
+UPSTREAM_MODEL = os.environ.get("UPSTREAM_MODEL", "").strip()
+UPSTREAM_MAX_TOKENS = int(os.environ.get("UPSTREAM_MAX_TOKENS", "0") or 0)
+UPSTREAM_FIELDS = ("model", "messages", "max_tokens", "temperature", "stop", "tools", "tool_choice")
+
+
+def upstream_body(body):
+    if not UPSTREAM_MODEL:
+        return {**body, "stream": False}
+    out = {k: body[k] for k in UPSTREAM_FIELDS if k in body}
+    out["model"] = UPSTREAM_MODEL
+    if UPSTREAM_MAX_TOKENS:
+        asked = out.get("max_tokens")
+        out["max_tokens"] = min(int(asked), UPSTREAM_MAX_TOKENS) if isinstance(asked, int) and asked > 0 else UPSTREAM_MAX_TOKENS
+    out["stream"] = False
+    return out
 PRICE_1K = int(os.environ.get("PRICE_NANO_PER_1K", "200000"))
 
 app = FastAPI(title="GRAM-402 reference server")
@@ -67,7 +84,7 @@ async def answer(body):
                 "message": {"role": "assistant", "content": text}}],
                 "usage": {"prompt_tokens": len(str(body.get("messages"))) // 4, "completion_tokens": len(text) // 4}}
     async with httpx.AsyncClient(timeout=180) as cli:
-        r = await cli.post(f"{UPSTREAM}/chat/completions", json={**body, "stream": False},
+        r = await cli.post(f"{UPSTREAM}/chat/completions", json=upstream_body(body),
                            headers={"Authorization": f"Bearer {UPSTREAM_KEY}"} if UPSTREAM_KEY else None)
     if r.status_code >= 400:
         raise HTTPException(502, f"upstream {r.status_code}")
