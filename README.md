@@ -136,6 +136,10 @@ Sell your own API to PayPal-funded agents, money straight to your PayPal busines
 ```python
 from paypal_paywall import paypal_paywall          # server/paypal_paywall.py
 app = paypal_paywall(app, {"/v1/weather": 5})      # path -> price in cents; adds the /v1/mandates endpoints
+
+# both rails on one path: GRAM agents and PayPal agents buy the same endpoint
+from gram402_merchant import Merchant                # clients/python
+app = paypal_paywall(app, {"/v1/weather": {"cents": 5, "nano": 50_000_000}}, gram=Merchant(api_key, pay_to))
 ```
 
 ## Security

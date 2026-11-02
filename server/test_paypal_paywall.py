@@ -63,4 +63,25 @@ assert r.status_code == 402 and "revoked" in r.json()["error"]
 paypal402.MAX_NEW_PER_HOUR = 1
 r = cl.post("/v1/mandates", json={"budget_cents": 10, "per_request_cents": 5, "days": 1})
 assert r.status_code == 429, r.text
+
+# Both rails on one path: GRAM through a facilitator merchant, PayPal through the mandate.
+class FakeGram:
+    def invoice(self, nano, resource, description=""):
+        return {"x402": {"accepts": [{"scheme": "ton-transfer", "maxAmountRequired": str(nano), "resource": resource,
+                                      "extra": {"invoice": "g1"}}]}}
+
+    def settle(self, xp):
+        return {"success": True, "x_payment_response": "gram-ok"} if "g1" in xp else {"success": False, "retry": True,
+                                                                                      "invalidReason": "not on chain yet"}
+
+
+paypal402.MAX_NEW_PER_HOUR = 60
+both = TestClient(paypal_paywall(api, {"/v1/weather": {"cents": 5, "nano": 50_000_000}}, tempfile.mktemp(suffix=".db"),
+                                 gram=FakeGram()))
+r = both.get("/v1/weather")
+assert r.status_code == 402 and [a["scheme"] for a in r.json()["accepts"]] == ["ton-transfer", "paypal-mandate"]
+r = both.get("/v1/weather", headers={"X-PAYMENT": "g1-claim"})
+assert r.status_code == 200 and r.headers["x-payment-response"] == "gram-ok"
+r = both.get("/v1/weather", headers={"X-PAYMENT": "other"})
+assert r.status_code == 402 and r.headers.get("retry-after") == "5"
 print("paypal paywall OK")

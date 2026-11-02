@@ -23,7 +23,14 @@ import paypal402
 _MID = re.compile(r"^/v1/mandates/(m_[0-9a-f]{16})(/approved|/cancelled)?$")
 
 
-def paypal_paywall(app, prices, db_path=None):
+def _price(p):
+    """A price is cents (int) or {"cents": .., "nano": ..} to sell on both rails."""
+    return (p, None) if isinstance(p, int) else (p.get("cents"), p.get("nano"))
+
+
+def paypal_paywall(app, prices, db_path=None, gram=None, description=""):
+    """`gram`: optional gram402_merchant.Merchant; then a path priced {"cents": c, "nano": n} offers both rails."""
+    import asyncio
     path_db = db_path or os.environ.get("PAYWALL_DB", "paypal_paywall.db")
 
     def db():
@@ -93,18 +100,35 @@ def paypal_paywall(app, prices, db_path=None):
             return await mandates(scope, receive, send, hdrs)
         if path not in prices:
             return await app(scope, receive, send)
+        cents, nano = _price(prices[path])
         xpay = hdrs.get("x-payment")
         claim = paypal402.parse_header(xpay) if xpay else None
-        if not claim:
+        if not xpay:
+            accepts = []
+            if gram is not None and nano:
+                inv = await asyncio.to_thread(gram.invoice, nano, path, description)
+                accepts += (inv.get("x402") or {}).get("accepts", [])
+            if cents:
+                with db() as c:
+                    accepts.append(paypal402.accept(paypal402.create_invoice(c, int(cents), path), path))
+            if not accepts:
+                return await reply(send, 503, {"error": "payment service unavailable"})
+            return await reply(send, 402, {"x402Version": 1, "error": "payment required", "accepts": accepts})
+        if claim:
             with db() as c:
-                inv = paypal402.create_invoice(c, int(prices[path]), path)
-            return await reply(send, 402, {"x402Version": 1, "error": "payment required",
-                                           "accepts": [paypal402.accept(inv, path)]})
-        with db() as c:
-            st = await paypal402.settle(c, claim)
-        if not st["ok"]:
-            return await reply(send, 402, {"x402Version": 1, "error": st["error"]})
-        hdr = paypal402.response_header(st).encode()
+                st = await paypal402.settle(c, claim)
+            if not st["ok"]:
+                return await reply(send, 402, {"x402Version": 1, "error": st["error"]})
+            hdr = paypal402.response_header(st).encode()
+        elif gram is not None and nano:
+            s = await asyncio.to_thread(gram.settle, xpay)
+            if not s.get("success"):
+                extra = [(b"retry-after", b"5")] if s.get("retry") else []
+                return await reply(send, 402, {"x402Version": 1, "error": s.get("invalidReason") or "payment rejected"},
+                                   extra)
+            hdr = s["x_payment_response"].encode()
+        else:
+            return await reply(send, 402, {"x402Version": 1, "error": "unsupported payment scheme"})
 
         async def send2(msg):
             if msg["type"] == "http.response.start":
