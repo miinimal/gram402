@@ -19,7 +19,8 @@ ZOOM = "document.addEventListener('DOMContentLoaded', () => { document.documentE
 
 def browser(p, out_dir):
     b = p.chromium.launch()
-    ctx = b.new_context(viewport=VIEW, color_scheme="dark", record_video_dir=out_dir, record_video_size=VIEW)
+    ctx = b.new_context(viewport=VIEW, color_scheme="dark", record_video_dir=out_dir, record_video_size=VIEW,
+                        locale="en-US", timezone_id=os.environ.get("DEMO_TZ", "America/Los_Angeles"))
     ctx.add_init_script(ZOOM)
     return b, ctx, ctx.new_page()
 
