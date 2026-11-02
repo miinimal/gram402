@@ -1,0 +1,37 @@
+name: near-e2e
+# Live run on NEAR testnet: faucet accounts, contract deploy, mandate, an agent paying HTTP 402 invoices through it.
+on:
+  push:
+    branches: [main]
+    paths: ["near/e2e/**", ".github/workflows/near-e2e.yml"]
+  workflow_dispatch:
+concurrency: {group: near-e2e, cancel-in-progress: false}
+jobs:
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -r server/requirements.txt
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            near/contract/target
+          key: near-${{ hashFiles('near/contract/Cargo.toml') }}
+      - run: rustup target add wasm32-unknown-unknown
+      - name: install cargo-near and near-cli-rs
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/cargo-near/releases/latest/download/cargo-near-installer.sh | sh
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/near-cli-rs/releases/latest/download/near-cli-rs-installer.sh | sh
+      - name: build contract
+        working-directory: near/contract
+        run: cargo near build non-reproducible-wasm
+      - name: run end to end on testnet
+        run: WASM=$(ls $PWD/near/contract/target/near/*.wasm | head -1) bash near/e2e/run.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: near-e2e-log, path: e2e.log}
