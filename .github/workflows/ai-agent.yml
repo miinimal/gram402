@@ -1,14 +1,8 @@
 name: ai-agent
-# The AI shopper demo with a real LLM (GitHub Models, no extra keys): the model decides what to buy, the server
-# enforces the PayPal mandate. Payments use the simulated PayPal API here (the live sandbox run needs the owner's approval).
-on:
-  push:
-    branches: [main]
-    paths: ["demo/ai_shopper.py", ".github/workflows/ai-agent.yml"]
-  workflow_dispatch:
-permissions:
-  contents: read
-  models: read
+# The AI shopper demo with a real LLM: the model decides what to buy, the server enforces the PayPal mandate
+# (simulated PayPal API here). Any OpenAI-compatible endpoint: set repo secrets LLM_URL, LLM_KEY, LLM_MODEL.
+on: {workflow_dispatch: {}}
+permissions: {contents: read}
 jobs:
   shopper:
     runs-on: ubuntu-24.04
@@ -17,21 +11,13 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
       - run: pip install -r server/requirements.txt
-      - name: probe GitHub Models
-        env: {GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"}
-        run: |
-          curl -sS -m 60 https://models.github.ai/inference/chat/completions -H "Content-Type: application/json" \
-            -H "Accept: application/vnd.github+json" -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -d '{"model":"openai/gpt-4o-mini","messages":[{"role":"user","content":"Say OK in one word."}]}' | head -c 600; echo
       - name: LLM agent shops within a mandate
         env:
-          LLM_URL: https://models.github.ai/inference
-          LLM_KEY: ${{ secrets.GITHUB_TOKEN }}
-          LLM_MODEL: openai/gpt-4o-mini
+          LLM_URL: ${{ secrets.LLM_URL }}
+          LLM_KEY: ${{ secrets.LLM_KEY }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
         run: |
           set -o pipefail
+          if [ -z "$LLM_URL" ]; then echo "LLM_URL secret not set: skipped"; exit 0; fi
           timeout 300 python3 demo/ai_shopper.py 2>&1 | tee shopper.log
           { echo '## AI shopper (real LLM)'; echo '```'; cat shopper.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with: {name: ai-shopper-log, path: shopper.log}
