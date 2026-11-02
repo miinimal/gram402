@@ -59,6 +59,9 @@ def events(b: dict):
 
 
 BASE = f"http://localhost:{PORT}"
+for _k in ("LLM_URL", "LLM_KEY", "LLM_MODEL"):  # values pasted from a phone often end with a newline
+    if os.environ.get(_k):
+        os.environ[_k] = os.environ[_k].strip()
 TOOLS = [{"type": "function", "function": {
     "name": "buy", "description": "Call a paid API from the catalog; it is paid from your PayPal mandate.",
     "parameters": {"type": "object", "properties": {"path": {"type": "string", "enum": list(CATALOG)},
@@ -69,8 +72,7 @@ def llm(messages):
     req = urllib.request.Request(os.environ["LLM_URL"].rstrip("/") + "/chat/completions", method="POST",
                                  data=json.dumps({"model": os.environ.get("LLM_MODEL", "gpt-4o-mini"),
                                                   "messages": messages, "tools": TOOLS}).encode(),
-                                 headers={"Content-Type": "application/json", "Accept": "application/vnd.github+json",
-                                          "X-GitHub-Api-Version": "2022-11-28",
+                                 headers={"Content-Type": "application/json",
                                           "Authorization": "Bearer " + os.environ.get("LLM_KEY", "")})
     try:
         with urllib.request.urlopen(req, timeout=120) as r:
