@@ -17,14 +17,12 @@ jobs:
       PAYPAL_CLIENT_SECRET: ${{ secrets.PAYPAL_CLIENT_SECRET }}
       PAYPAL_ENV: sandbox
       PAYPAL_SANDBOX_ONLY: "1"
-      GRAM402_DB: ${{ runner.temp }}/demo.db
-      DEMO_STATE: ${{ runner.temp }}/mandate.json
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
       - run: pip install -q -r server/requirements.txt
       - name: create
-        run: DEMO_PHASE=create python3 demo/paypal_agent_demo.py
+        run: GRAM402_DB=$RUNNER_TEMP/demo.db DEMO_STATE=$RUNNER_TEMP/mandate.json DEMO_PHASE=create python3 demo/paypal_agent_demo.py
       - name: run
-        run: DEMO_PHASE=run python3 demo/paypal_agent_demo.py
+        run: GRAM402_DB=$RUNNER_TEMP/demo.db DEMO_STATE=$RUNNER_TEMP/mandate.json DEMO_PHASE=run python3 demo/paypal_agent_demo.py
