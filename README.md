@@ -173,7 +173,6 @@ Contract: [mandate.g4021793640330-owner.testnet](https://testnet.nearblocks.io/a
 Agent side: `clients/python/near_mandate.py` and `clients/typescript/near_mandate.ts` — `NearMandateClient(url, mandate_id, pay)` answers 402 by calling
 `pay` on the contract through your signing callback (any NEAR library or near-cli-rs), with its own price cap.
 
-Contract: [mandate.g4021793640330-owner.testnet](https://testnet.nearblocks.io/address/mandate.g4021793640330-owner.testnet).
 Reproduce: `.github/workflows/near-e2e.yml` (fresh faucet accounts, deploy, mandate, agent payments).
 
 NEAR HACKATHON: work for the hackathon starts at baseline commit `5f3ba49`; see
