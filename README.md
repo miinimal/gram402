@@ -156,24 +156,24 @@ nobody can make the contract pay for storage or squat invoice ids. A failed tran
 mandate; a failed refund on revoke re-activates it. Even a compromised agent cannot spend outside the limits: give it
 a function-call access key that may only call `pay`.
 
-Live run on NEAR testnet (CI workflow `near-e2e`, contract v2, 2026-11-02):
+Live run on NEAR testnet (CI workflow `near-e2e`, current contract, 2026-11-02):
 
 | Step | Transaction |
 |------|-------------|
-| Mandate created: 0.02 NEAR deposit (storage + budget), cap 0.002 NEAR per payment, one merchant | [4rH7AfB4…](https://testnet.nearblocks.io/txns/4rH7AfB4ZD1Jpc2dwUyZFHLfd73u52WF5L5HPrv75jb6) |
-| Agent pays invoice 1; the server verifies the transaction and answers with a signed receipt | [7JR63ZrL…](https://testnet.nearblocks.io/txns/7JR63ZrLt8PTKMWXyNUmoPdpgtBUmmDQqkBWHJb5ad8h) |
-| Agent pays invoice 2 | [CM6b12ay…](https://testnet.nearblocks.io/txns/CM6b12ayhF2wK5bmyZmvmgCT9EaHSWTAxUi3ijN8ia3T) |
+| Mandate created: 0.02 NEAR deposit (storage + budget), cap 0.002 NEAR per payment, one merchant | [6YYcErz6…](https://testnet.nearblocks.io/txns/6YYcErz6scidQ5ST2UVy8cmjiEchdvP2KhHjxrhfoNc7) |
+| Agent pays invoice 1; the server verifies the transaction and answers with a signed receipt | [B5YUBzjK…](https://testnet.nearblocks.io/txns/B5YUBzjKZipfme7DEEMMJ5LXMs75DaqzWt6K89sbAiYB) |
+| Agent pays invoice 2 | [zGTNJXvJ…](https://testnet.nearblocks.io/txns/zGTNJXvJfxDihXTmQbJ4iwC17oKcWPzh3yTBzEE3nqJ) |
 | Payment over the cap: refused by the contract ("amount exceeds the per-payment cap") | — |
-| Agent's full-access key deleted; only a function-call key for `pay` on the mandate remains | [5WmpDRAi…](https://testnet.nearblocks.io/txns/5WmpDRAi1uWYvaZ1GYa8ki7ZV7s6CLpy8mG7DpUDMBd) |
-| Sandboxed agent still pays through the mandate | [C9ucv1kj…](https://testnet.nearblocks.io/txns/C9ucv1kjhH2At9HufhdWoSAYeNo5HaXjpVPUsASTAkeJ) |
+| Agent's full-access key deleted; only a function-call key for `pay` on the mandate remains | [BohtXmVb…](https://testnet.nearblocks.io/txns/BohtXmVb7esbLEnkiZ2aEKuXHHVgkZgp9xTnfVi85tzS) |
+| Sandboxed agent still pays through the mandate | [HgEgaHL1…](https://testnet.nearblocks.io/txns/HgEgaHL1ou8JHkewG33sau5u7gaGyX4Cfh1icCqjRYND) |
 | Sandboxed agent tries to send NEAR directly: cannot be signed, a transfer needs a full-access key the agent no longer has | — |
 
-Contract: [mandate.g4021793640330-owner.testnet](https://testnet.nearblocks.io/address/mandate.g4021793640330-owner.testnet).
+Contract: [mandate.g4021793642369-owner.testnet](https://testnet.nearblocks.io/address/mandate.g4021793642369-owner.testnet).
 
 ### Agent economy: agents buying from agents
 
 CI workflow `near-economy` runs a small market on NEAR testnet (2026-11-02, contract
-[mandate.g402e1793641646.testnet](https://testnet.nearblocks.io/address/mandate.g402e1793641646.testnet)):
+[mandate.g402e1793642375.testnet](https://testnet.nearblocks.io/address/mandate.g402e1793642375.testnet)):
 agent A buys trip plans from agent B; to write a plan, B buys a weather report from service C. A pays from a
 mandate its owner funded; B opens its own procurement mandate from its first sale and pays C from it. Every payment
 is an HTTP 402 invoice settled through the mandate contract. (C answers with the demo echo model; payments are real
@@ -181,11 +181,11 @@ testnet transactions.)
 
 | Step | Transaction |
 |------|-------------|
-| A pays B for plan 1 (0.01 NEAR) | [EZ9XDsRH…](https://testnet.nearblocks.io/txns/EZ9XDsRH3zVRP4pc8dEokUrrRdNXaW8bAv54j7eTDJv2) |
-| B opens its procurement mandate from that revenue (0.006 NEAR) | [ARDxPze5…](https://testnet.nearblocks.io/txns/ARDxPze5cwVWXEgp9psGKhKg7VTJcA57gvJSGHpVA519) |
-| B pays C for weather (0.001 NEAR) | [nm1uXwqk…](https://testnet.nearblocks.io/txns/nm1uXwqk9YXpxzMmcGDzW8DM7Hw6hZYYpN6UvHmXHBM) |
-| A pays B for plan 2 | [3giQ45NK…](https://testnet.nearblocks.io/txns/3giQ45NKaco8DCshetwadcPWqATWwSD2QYaqdsM2dxNx) |
-| B pays C again | [6pxNihTU…](https://testnet.nearblocks.io/txns/6pxNihTUccoKcebksBUiFvisFmYZtZej1Qn1n9PQTKCV) |
+| A pays B for plan 1 (0.01 NEAR) | [HS6nVJMG…](https://testnet.nearblocks.io/txns/HS6nVJMGpCf7XqqtG7QybXTihdDPZFCBBXKhdsQh52f8) |
+| B opens its procurement mandate from that revenue (0.006 NEAR) | [D2LGsxy4…](https://testnet.nearblocks.io/txns/D2LGsxy4N6LgtmB6u3EmgvwMF74dPMfShHLBe5PPweoT) |
+| B pays C for weather (0.001 NEAR) | [5CsXJGn1…](https://testnet.nearblocks.io/txns/5CsXJGn1hpH9Z3i5w82j3VDqFBE1ovyyTgf2jyXvS8o2) |
+| A pays B for plan 2 | [6MqRVTKA…](https://testnet.nearblocks.io/txns/6MqRVTKAkYkVn531iVsL4hRPexYPH1WmemCdti8egw5P) |
+| B pays C again | [AMF9Magw…](https://testnet.nearblocks.io/txns/AMF9MagwVAj3Y5ckn15tBwvVncsbu5KQPLzBH72VV5Qd) |
 
 B's result: revenue 0.020 NEAR, data cost 0.002 NEAR, gross margin 0.018 NEAR, all visible on chain.
 
