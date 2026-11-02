@@ -26,7 +26,7 @@ agent ── POST + X-PAYMENT {invoice, secret} ▶ server: finds the transfer, 
 | [`clients/typescript/gram402.ts`](clients/typescript/gram402.ts) | TypeScript client, no dependencies |
 | [`clients/python/gram402_merchant.py`](clients/python/gram402_merchant.py) | Sell your API for GRAM via the hosted facilitator, stdlib only |
 | [`clients/typescript/gram402_merchant.ts`](clients/typescript/gram402_merchant.ts) | The same for JavaScript: fetch-style and Express paywalls |
-| [`RECEIPTS.md`](RECEIPTS.md) | RECEIPTS v1: portable signed receipts, key pinning, disputes linked by `receipt_id` |
+| [`RECEIPTS.md`](RECEIPTS.md) | RECEIPTS v1: portable signed receipts, key pinning, disputes linked by `receipt_id`, notarization (Merkle root over hashes, anchored in TON) |
 | [`clients/python/minimalai_receipt.py`](clients/python/minimalai_receipt.py) | Offline receipt verifier (pinned key, no call to the issuer) |
 
 ## Run the reference server

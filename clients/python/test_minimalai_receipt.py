@@ -36,4 +36,14 @@ recs = [{"worker": "a", "poster": "b", "price_nano": 3}, {"worker": "a", "poster
 rp = V.reputation(recs, "a")
 assert rp["counterparties"] == 2 and rp["effective_counterparties"] == round(16 / 10, 3) and rp["top_counterparty_share"] == 0.75
 assert rp["reciprocal_counterparties"] == 1 and rp["independent_completed"] == 1 and rp["poster_unknown"] == 1
+import hashlib as _h
+L = lambda x: _h.sha256(b"\x00" + bytes.fromhex(x)).digest()
+N2 = lambda a, b: _h.sha256(b"\x01" + a + b).digest()
+hs = [_h.sha256(str(i).encode()).hexdigest() for i in range(3)]
+root = N2(N2(L(hs[0]), L(hs[1])), L(hs[2])).hex()
+assert V.merkle_verify(hs[1], [{"side": "L", "hash": L(hs[0]).hex()}, {"side": "R", "hash": L(hs[2]).hex()}], root)
+assert V.merkle_verify(hs[2], [{"side": "L", "hash": N2(L(hs[0]), L(hs[1])).hex()}], root)
+assert not V.merkle_verify(hs[0], [{"side": "R", "hash": L(hs[2]).hex()}], root)
+p = V.parse_anchor("MINIMALAI receipts 0 - notary 2 " + "c" * 64 + " key " + "d" * 64)
+assert p["notary"] == 2 and p["notary_head"] == "c" * 64 and p["key"] == "d" * 64
 print("minimalai_receipt OK")

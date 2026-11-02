@@ -82,6 +82,15 @@ def reputation(task_receipts, worker):
             "independent_earned_nano": sum(int(r.get("price_nano") or 0) for r in indep), "poster_unknown": unknown}
 
 
+def merkle_verify(h, path, root):
+    """Notary proof (GET /v1/notary/{id}/proof/{hash}): leaf = sha256(0x00||h), node = sha256(0x01||left||right)."""
+    cur = hashlib.sha256(b"\x00" + bytes.fromhex(h)).digest()
+    for step in path:
+        sib = bytes.fromhex(step["hash"])
+        cur = hashlib.sha256(b"\x01" + (sib + cur if step["side"] == "L" else cur + sib)).digest()
+    return cur.hex() == root
+
+
 def parse_anchor(comment):
     """Parse a TON anchor comment: 'MINIMALAI receipts <n> <head|-> [disputes <m> <head>] [key <hex>]'."""
     t = comment.split()
@@ -91,6 +100,8 @@ def parse_anchor(comment):
     i = 4
     if i < len(t) and t[i] == "disputes":
         out.update(disputes=int(t[i + 1]), disputes_head=t[i + 2]); i += 3
+    if i < len(t) and t[i] == "notary":
+        out.update(notary=int(t[i + 1]), notary_head=t[i + 2]); i += 3
     if i < len(t) and t[i] == "key":
         out["key"] = t[i + 1]
     return out

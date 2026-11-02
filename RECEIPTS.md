@@ -93,13 +93,23 @@ Rationale: two colluding accounts farming completed tasks show up as one counter
 reciprocal pair. Spreading fake payers needs real money across many accounts, and each of them becomes visible in the
 public graph. Funding-source analysis (which accounts are funded from one wallet) is a candidate for v2.
 
+## Notarization (`kind: notarization`)
+
+`POST /v1/notary` signs a Merkle root over 1..100 SHA-256 hashes supplied by the client (contents never reach the
+issuer). Fields: `notary_id`, `merkle_root`, `count`, `label` (optional, public), `client` (pseudonym of the paying key),
+`price_nano`, `prev_sha256` (notarization chain). Merkle tree: leaf = sha256(0x00 || hash bytes), node =
+sha256(0x01 || left || right); an odd last node moves up unchanged. `GET /v1/notary/{id}/proof/{hash}` returns the path
+(`side` = where the sibling sits); `merkle_verify()` in the verifier checks it offline. The chain head is included in
+the daily TON anchor comment as `notary <count> <head>`. A record proves the issuer saw the hashes no later than `ts`
+(and, after anchoring, no later than the anchor transaction); it does not prove authorship or truth.
+
 ## Key pinning
 
 The key is published in two places; a verifier pins one and cross-checks the other:
 
 1. `GET /.well-known/minimalai.json` → `receipt_key_ed25519`;
 2. on-chain: every daily TON anchor transaction carries the comment
-   `MINIMALAI receipts <n> <task head|-> [disputes <m> <dispute head>] key <hex>`.
+   `MINIMALAI receipts <n> <task head|-> [disputes <m> <dispute head>] [notary <k> <notary head>] key <hex>`.
    The anchor wallet is a dedicated wallet that only sends 0 GRAM to itself; its history is immutable.
 
 ## Disputes API
