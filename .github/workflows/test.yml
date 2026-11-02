@@ -1,0 +1,15 @@
+name: test
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - uses: actions/setup-node@v4
+        with: {node-version: "20"}
+      - run: pip install -r server/requirements.txt
+      - run: cd server && python3 test_app.py
+      - run: python3 clients/python/test_gram402.py
+      - run: ./clients/typescript/test.sh
