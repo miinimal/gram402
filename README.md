@@ -120,6 +120,24 @@ PAYPAL_CLIENT_ID=... PAYPAL_CLIENT_SECRET=... python3 demo/paypal_agent_demo.py 
 | Protocol | `SPEC.md`, section "PayPal mandate rail" |
 | Tests (fake PayPal API) and a live sandbox check in CI | `server/test_paypal.py`, `server/smoke_paypal_sandbox.py` |
 
+Give the mandate to Claude Desktop (or any MCP client) and the model pays for its own calls:
+
+```json
+{"mcpServers": {"gram402-mandate": {
+  "command": "python3", "args": ["/path/to/gram402/clients/python/mandate_mcp.py"],
+  "env": {"GRAM402_URL": "https://your-gateway", "MANDATE_ID": "m_...", "MANDATE_SECRET": "...", "MANDATE_MAX_CENTS": "25"}}}}
+```
+
+The secret stays in the MCP server's environment; the model only sees the tools `mandate_status`, `paid_chat` and
+`paid_call`, and every limit is enforced by the server, not by the model.
+
+Sell your own API to PayPal-funded agents, money straight to your PayPal business account, one line for any ASGI app:
+
+```python
+from paypal_paywall import paypal_paywall          # server/paypal_paywall.py
+app = paypal_paywall(app, {"/v1/weather": 5})      # path -> price in cents; adds the /v1/mandates endpoints
+```
+
 ## Security
 
 - Transfer comments are public on chain, so the invoice id never settles alone: the private `secret` is required.
