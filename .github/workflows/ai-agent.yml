@@ -1,0 +1,30 @@
+name: ai-agent
+# The AI shopper demo with a real LLM (GitHub Models, no extra keys): the model decides what to buy, the server
+# enforces the PayPal mandate. Payments use the simulated PayPal API here (the live sandbox run needs the owner's approval).
+on:
+  push:
+    branches: [main]
+    paths: ["demo/ai_shopper.py", ".github/workflows/ai-agent.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  models: read
+jobs:
+  shopper:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -r server/requirements.txt
+      - name: LLM agent shops within a mandate
+        env:
+          LLM_URL: https://models.github.ai/inference
+          LLM_KEY: ${{ secrets.GITHUB_TOKEN }}
+          LLM_MODEL: openai/gpt-4o-mini
+        run: |
+          timeout 300 python3 demo/ai_shopper.py | tee shopper.log
+          { echo '## AI shopper (real LLM)'; echo '```'; cat shopper.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: ai-shopper-log, path: shopper.log}
