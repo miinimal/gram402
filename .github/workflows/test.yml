@@ -16,5 +16,11 @@ jobs:
       - run: python3 clients/python/test_minimalai_receipt.py
       - run: python3 clients/python/test_gram402_merchant.py
       - run: python3 clients/python/test_paywall.py
+      - run: python3 clients/python/test_paypal_mandate.py
       - run: ./clients/typescript/test.sh
       - run: ./clients/typescript/test_merchant.sh
+      - name: PayPal sandbox live check (skipped without secrets)
+        run: cd server && python3 smoke_paypal_sandbox.py
+        env:
+          PAYPAL_CLIENT_ID: ${{ secrets.PAYPAL_CLIENT_ID }}
+          PAYPAL_CLIENT_SECRET: ${{ secrets.PAYPAL_CLIENT_SECRET }}
