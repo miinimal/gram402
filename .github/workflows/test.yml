@@ -16,3 +16,4 @@ jobs:
       - run: python3 clients/python/test_gram402_merchant.py
       - run: python3 clients/python/test_paywall.py
       - run: ./clients/typescript/test.sh
+      - run: ./clients/typescript/test_merchant.sh

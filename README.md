@@ -25,6 +25,7 @@ agent ── POST + X-PAYMENT {invoice, secret} ▶ server: finds the transfer, 
 | [`clients/python/gram402.py`](clients/python/gram402.py) | Python client, stdlib only |
 | [`clients/typescript/gram402.ts`](clients/typescript/gram402.ts) | TypeScript client, no dependencies |
 | [`clients/python/gram402_merchant.py`](clients/python/gram402_merchant.py) | Sell your API for GRAM via the hosted facilitator, stdlib only |
+| [`clients/typescript/gram402_merchant.ts`](clients/typescript/gram402_merchant.ts) | The same for JavaScript: fetch-style and Express paywalls |
 | [`RECEIPTS.md`](RECEIPTS.md) | RECEIPTS v1: portable signed receipts, key pinning, disputes linked by `receipt_id` |
 | [`clients/python/minimalai_receipt.py`](clients/python/minimalai_receipt.py) | Offline receipt verifier (pinned key, no call to the issuer) |
 
@@ -82,7 +83,17 @@ from gram402_merchant import Merchant, paywall
 app = paywall(app, Merchant("mai-...", "UQ...your wallet"), {"/v1/weather": 20_000_000})  # path -> nano-GRAM
 ```
 
-An agent pays any such endpoint with the client: `Gram402Client(base, pay=...).call(url, method="GET")`.
+JavaScript (Express, Hono, Bun, Deno, Cloudflare Workers), no dependencies:
+
+```ts
+import { Merchant, withPaywall, expressPaywall } from './gram402_merchant';
+const m = new Merchant('mai-...', 'UQ...your wallet');
+export default { fetch: withPaywall(m, { '/v1/weather': 20_000_000n }, handler) };  // fetch-style
+app.use(expressPaywall(m, { '/v1/weather': 20_000_000n }));                          // Express
+```
+
+An agent pays any such endpoint with the client: `Gram402Client(base, pay=...).call(url, method="GET")` (Python) or
+`new Gram402Client(base, pay).call(url)` (TypeScript).
 
 A key comes from `POST https://ai.minimalcult.org/v1/agents/onboard`; top it up for fees with the returned
 `top_up` comment.

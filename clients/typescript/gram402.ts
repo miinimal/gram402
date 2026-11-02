@@ -62,6 +62,32 @@ export class Gram402Client {
       return done(r);
     }
   }
+
+  /** Call any GRAM-402 endpoint by absolute URL (e.g. a GRAM-402 Bazaar listing): pays the 402 invoice, polls while
+   *  the transfer is not visible yet (402 + Retry-After), returns the final Response. */
+  async call(url: string, init: RequestInit = {}): Promise<Response> {
+    const send = (extra: Record<string, string>) =>
+      fetch(url, { ...init, headers: { 'Content-Type': 'application/json', ...(init.headers as any), ...extra } });
+    const first = await send({});
+    if (first.status !== 402) return first;
+    const q: any = await first.json().catch(() => ({}));
+    const acc = (q.accepts || []).find((a: any) => a.scheme === 'ton-transfer');
+    if (!acc) throw new PaymentError('server offers no ton-transfer payment');
+    const amount = BigInt(acc.maxAmountRequired);
+    if (amount > this.maxNano) throw new PaymentError(`price ${amount} nano-GRAM exceeds maxNano ${this.maxNano}`);
+    await this.pay(acc.payTo, amount, acc.extra.comment);
+    const xpay = Buffer.from(JSON.stringify({ x402Version: 1, scheme: acc.scheme, network: acc.network,
+      payload: { invoice: acc.extra.invoice, secret: acc.extra.secret } })).toString('base64');
+    const deadline = Date.now() + this.waitMs;
+    for (;;) {
+      const r = await send({ 'X-PAYMENT': xpay });
+      if (r.status === 402 && r.headers.has('retry-after') && Date.now() < deadline) {
+        await new Promise((s) => setTimeout(s, this.pollMs)); continue;
+      }
+      this.lastPayment = r.headers.get('x-payment-response') ?? undefined;
+      return r;
+    }
+  }
 }
 
 function done(r: { status: number; json: any }) {
