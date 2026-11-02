@@ -69,7 +69,7 @@ def llm(messages):
     req = urllib.request.Request(os.environ["LLM_URL"].rstrip("/") + "/chat/completions", method="POST",
                                  data=json.dumps({"model": os.environ.get("LLM_MODEL", "gpt-4o-mini"),
                                                   "messages": messages, "tools": TOOLS}).encode(),
-                                 headers={"Content-Type": "application/json", "Accept": "application/json",
+                                 headers={"Content-Type": "application/json", "Accept": "application/vnd.github+json",
                                           "X-GitHub-Api-Version": "2022-11-28",
                                           "Authorization": "Bearer " + os.environ.get("LLM_KEY", "")})
     try:

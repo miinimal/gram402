@@ -17,6 +17,12 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
       - run: pip install -r server/requirements.txt
+      - name: probe GitHub Models
+        env: {GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"}
+        run: |
+          curl -sS -m 60 https://models.github.ai/inference/chat/completions -H "Content-Type: application/json" \
+            -H "Accept: application/vnd.github+json" -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -d '{"model":"openai/gpt-4o-mini","messages":[{"role":"user","content":"Say OK in one word."}]}' | head -c 600; echo
       - name: LLM agent shops within a mandate
         env:
           LLM_URL: https://models.github.ai/inference
