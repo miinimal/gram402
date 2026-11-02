@@ -9,6 +9,12 @@
         return 402, {"error": s.get("invalidReason")}
     # serve the request; add header X-PAYMENT-RESPONSE = s["x_payment_response"]
 
+ASGI paywall (FastAPI, Starlette, any ASGI app), one line:
+
+    app = paywall(app, Merchant(api_key, pay_to), {"/v1/weather": 20_000_000})   # path -> price in nano-GRAM
+
+Unpaid requests get HTTP 402 with the invoice; a request with X-PAYMENT is settled once and passed through with
+X-PAYMENT-RESPONSE; a payment not yet visible on chain gets 402 with Retry-After so GRAM-402 clients poll.
 Standard library only. Author: Aleksandr Shcherbakov (@miinimal) - MINIMALCULT.
 """
 import json
@@ -40,3 +46,39 @@ class Merchant:
 
     def settle(self, x_payment):
         return self._post("/v1/facilitator/settle", {"payment": x_payment})
+
+
+def paywall(app, merchant, prices, description=""):
+    """Wrap an ASGI app: requests to the paths in `prices` must be paid in GRAM through the facilitator."""
+    import asyncio
+
+    async def send_json(send, status, body, headers=()):
+        data = json.dumps(body).encode()
+        await send({"type": "http.response.start", "status": status,
+                    "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(data)).encode()),
+                                *headers]})
+        await send({"type": "http.response.body", "body": data})
+
+    async def wrapped(scope, receive, send):
+        if scope.get("type") != "http" or scope.get("path") not in prices:
+            return await app(scope, receive, send)
+        hdrs = {k.decode().lower(): v.decode() for k, v in scope.get("headers") or []}
+        xpay = hdrs.get("x-payment")
+        if not xpay:
+            inv = await asyncio.to_thread(merchant.invoice, prices[scope["path"]], scope["path"], description)
+            if "x402" not in inv:
+                return await send_json(send, 503, {"error": "payment service unavailable", "detail": inv.get("invalidReason")})
+            return await send_json(send, 402, inv["x402"])
+        s = await asyncio.to_thread(merchant.settle, xpay)
+        if not s.get("success"):
+            if s.get("retry"):
+                return await send_json(send, 402, {"error": s.get("invalidReason")}, [(b"retry-after", b"5")])
+            return await send_json(send, 402, {"error": s.get("invalidReason") or "payment rejected"})
+        resp = s["x_payment_response"].encode()
+
+        async def send2(msg):
+            if msg["type"] == "http.response.start":
+                msg = {**msg, "headers": [*msg.get("headers", []), (b"x-payment-response", resp)]}
+            await send(msg)
+        return await app(scope, receive, send2)
+    return wrapped

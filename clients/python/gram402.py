@@ -67,6 +67,45 @@ class Gram402Client:
                 continue
             return self._done(st, out)
 
+    def call(self, url, body=None, method="POST", headers=None):
+        """Call any GRAM-402 endpoint (e.g. a GRAM-402 Bazaar listing) by absolute URL: pays the 402 invoice through
+        `pay`, retries with X-PAYMENT while the transfer is not visible yet (402 + Retry-After), returns
+        (status, headers, json). Raises PaymentError above max_nano or when no ton-transfer payment is offered."""
+        def send(extra):
+            data = json.dumps(body).encode() if body is not None else None
+            req = urllib.request.Request(url, data=data, method=method,
+                                         headers={"Content-Type": "application/json", **(headers or {}), **extra})
+            try:
+                with self._open(req, timeout=180) as r:
+                    return r.status, dict(r.headers), json.loads(r.read() or b"{}")
+            except urllib.error.HTTPError as e:
+                raw = e.read() or b"{}"
+                try:
+                    return e.code, dict(e.headers), json.loads(raw)
+                except ValueError:
+                    return e.code, dict(e.headers), {"raw": raw[:300].decode(errors="replace")}
+        st, hd, req = send({})
+        if st != 402:
+            return st, hd, req
+        acc = next((a for a in req.get("accepts", []) if a.get("scheme") == "ton-transfer"), None)
+        if not acc:
+            raise PaymentError("server offers no ton-transfer payment")
+        amount = int(acc["maxAmountRequired"])
+        if amount > self.max_nano:
+            raise PaymentError(f"price {amount} nano-GRAM exceeds max_nano {self.max_nano}")
+        ex = acc["extra"]
+        self.pay(acc["payTo"], amount, ex["comment"])
+        xpay = base64.b64encode(json.dumps({"x402Version": 1, "scheme": acc["scheme"], "network": acc["network"],
+                                            "payload": {"invoice": ex["invoice"], "secret": ex["secret"]}}).encode()).decode()
+        deadline = time.time() + self.wait_s
+        while True:
+            st, hd, out = send({"X-PAYMENT": xpay})
+            if st == 402 and any(k.lower() == "retry-after" for k in hd) and time.time() < deadline:
+                time.sleep(self.poll_s)
+                continue
+            self.last_payment = next((v for k, v in hd.items() if k.lower() == "x-payment-response"), None)
+            return st, hd, out
+
     @staticmethod
     def _done(status, out):
         if status != 200:

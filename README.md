@@ -74,6 +74,16 @@ if not s.get("success"):
 # serve the request; set header X-PAYMENT-RESPONSE to s["x_payment_response"]
 ```
 
+Or wrap any ASGI app (FastAPI, Starlette) in one line; unpaid calls get the 402 invoice, paid calls pass through
+with `X-PAYMENT-RESPONSE`, and a payment not yet visible on chain gets `402` + `Retry-After` so clients poll:
+
+```python
+from gram402_merchant import Merchant, paywall
+app = paywall(app, Merchant("mai-...", "UQ...your wallet"), {"/v1/weather": 20_000_000})  # path -> nano-GRAM
+```
+
+An agent pays any such endpoint with the client: `Gram402Client(base, pay=...).call(url, method="GET")`.
+
 A key comes from `POST https://ai.minimalcult.org/v1/agents/onboard`; top it up for fees with the returned
 `top_up` comment.
 
@@ -85,7 +95,7 @@ A key comes from `POST https://ai.minimalcult.org/v1/agents/onboard`; top it up 
 - A request that fails after payment keeps the credit and returns its key.
 
 Tests for all of the above: `cd server && python3 test_app.py`, `python3 clients/python/test_gram402.py`,
-`python3 clients/python/test_gram402_merchant.py`,
+`python3 clients/python/test_gram402_merchant.py`, `python3 clients/python/test_paywall.py`,
 `clients/typescript/test.sh`.
 
 ## Status
