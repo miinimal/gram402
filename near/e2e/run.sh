@@ -38,6 +38,10 @@ FULL_KEY=$(near account list-keys "$AGENT" $NET now 2>&1 | grep -o 'ed25519:[1-9
 near_tx account add-key "$AGENT" grant-function-call-access --allowance '0.1 NEAR' --contract-account-id "$CONTRACT" \
   --function-names pay autogenerate-new-keypair save-to-legacy-keychain
 near_tx account delete-keys "$AGENT" public-keys "$FULL_KEY"
+# make the legacy keychain sign as the agent with the remaining function-call key
+CRED=$HOME/.near-credentials/testnet
+FC_FILE=$(ls "$CRED/$AGENT"/*.json | grep -v "${FULL_KEY#ed25519:}" | head -1)
+cp "$FC_FILE" "$CRED/$AGENT.json"
 echo "== sandboxed agent keys:" | tee -a e2e.log
 near account list-keys "$AGENT" $NET now 2>&1 | tee -a e2e.log
 CONTRACT=$CONTRACT AGENT=$AGENT MANDATE_ID=1 CAP_YOCTO=$CAP ONLY_ONE=1 python3 near/e2e/agent.py | tee -a e2e.log
