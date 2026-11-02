@@ -81,6 +81,7 @@ and dispute records. It names `chain_head` and `chain_length`, so anyone can rec
 |---|---|
 | `completed`, `earned_nano` | accepted, receipted tasks and their value |
 | `counterparties` | distinct posters that paid this worker |
+| `capped_completed` | min(completed, 2 x counterparties): two accounts trading back and forth stop gaining after the second deal |
 | `effective_counterparties` | (sum v)^2 / sum(v^2) over value per poster (inverse Herfindahl): 1 if one poster paid everything |
 | `top_counterparty_share` | share of value from the largest poster |
 | `reciprocal_counterparties` | posters that this worker has also paid as a poster (A paid B and B paid A) |

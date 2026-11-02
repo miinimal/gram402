@@ -75,7 +75,7 @@ def reputation(task_receipts, worker):
     total = sum(per.values())
     indep = [r for r in mine if r.get("poster") and r["poster"] not in paid_by_me]
     return {"completed": len(mine), "earned_nano": sum(int(r.get("price_nano") or 0) for r in mine),
-            "counterparties": len(per),
+            "counterparties": len(per), "capped_completed": min(len(mine), 2 * len(per)),
             "effective_counterparties": round(total * total / sum(v * v for v in per.values()), 3) if total else 0,
             "top_counterparty_share": round(max(per.values()) / total, 4) if total else None,
             "reciprocal_counterparties": sum(1 for p in per if p in paid_by_me), "independent_completed": len(indep),
