@@ -175,6 +175,32 @@ def status(c, mid, secret):
             "resources": json.loads(row["resources"] or "[]"), "currency": CURRENCY}
 
 
+_last_poll = {}
+
+
+async def refresh(c, mid, secret, now=None):
+    """Owner's status check that also asks PayPal whether the setup token was approved, so a mandate activates even
+    when PayPal's return redirect never reaches this server (approved on a phone, server behind NAT)."""
+    st = status(c, mid, secret)
+    if not st or st["status"] != "pending":
+        return st
+    now = now or time.monotonic()
+    if now - _last_poll.get(mid, -1e9) < 5:  # at most one PayPal call per mandate every 5 s
+        return st
+    if len(_last_poll) > 10_000:
+        _last_poll.clear()
+    _last_poll[mid] = now
+    tok = c.execute("SELECT setup_token FROM pp_mandates WHERE id=?", (mid,)).fetchone()["setup_token"]
+    try:
+        info = await _call("GET", f"/v3/vault/setup-tokens/{tok}")
+    except (Declined, RuntimeError, httpx.HTTPError):
+        return st
+    if info.get("status") == "APPROVED":
+        await activate(c, mid)
+        return status(c, mid, secret)
+    return st
+
+
 def revoke(c, mid, secret):
     if not status(c, mid, secret):
         return False

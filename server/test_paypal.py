@@ -205,4 +205,14 @@ assert r.status_code == 200 and "Mandate approved" in r.text
 r = cl.get("/v1/mandates/m_unknown/approved", headers={"Accept": "text/html"})
 assert "not activated" in r.text
 
+# 20. Approval confirmed by polling PayPal from the owner's status check (redirect never reached the server).
+m9 = cl.post("/v1/mandates", json={"budget_cents": 20, "per_request_cents": 5, "days": 1}).json()
+h9 = {"X-Mandate-Secret": m9["secret"]}
+assert cl.get(f"/v1/mandates/{m9['mandate']}", headers=h9).json()["status"] == "pending"
+STATE["setup_approved"] = True
+paypal402._last_poll.clear()
+assert cl.get(f"/v1/mandates/{m9['mandate']}", headers=h9).json()["status"] == "active"
+assert cl.get(f"/v1/mandates/{m9['mandate']}", headers={"X-Mandate-Secret": "wrong"}).status_code == 404
+STATE["setup_approved"] = False
+
 print("paypal rail: all tests passed;", STATE["orders"], "captures,", len(STATE["calls"]), "PayPal calls")

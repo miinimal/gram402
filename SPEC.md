@@ -190,7 +190,7 @@ Mandate (owner side):
 | Call | Effect |
 |------|--------|
 | `POST /v1/mandates {budget_cents, per_request_cents, days, resources?}` | creates a pending mandate and a PayPal Vault v3 setup token; returns `mandate`, `secret` (once) and `approve_url` |
-| owner opens `approve_url`, approves on PayPal | PayPal redirects to `/v1/mandates/{id}/approved`; the server stores the vault payment token; status `active` |
+| owner opens `approve_url`, approves on PayPal | PayPal redirects to `/v1/mandates/{id}/approved` (or the owner's next status check finds the setup token `APPROVED`); the server stores the vault payment token; status `active` |
 | `GET /v1/mandates/{id}` + header `X-Mandate-Secret` | status, budget, spent, left, expiry |
 | `DELETE /v1/mandates/{id}` + header `X-Mandate-Secret` | revokes the mandate at once |
 

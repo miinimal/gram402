@@ -114,6 +114,10 @@ PAYPAL_CLIENT_ID=... PAYPAL_CLIENT_SECRET=... python3 demo/paypal_agent_demo.py 
 LLM_URL=https://api.openai.com/v1 LLM_KEY=... LLM_MODEL=gpt-4o-mini python3 demo/ai_shopper.py   # any OpenAI-compatible LLM
 ```
 
+No local setup: the `paypal-live` workflow runs the same demo against the PayPal sandbox from repository secrets.
+The approval link appears as a notice on the run; approve on any device. The server confirms the approval with
+PayPal itself (setup-token status), so the return redirect does not have to reach it.
+
 | Piece | File |
 |-------|------|
 | Server rail (Vault v3 mandates, Orders v2 captures, limits, idempotency) | `server/paypal402.py` |

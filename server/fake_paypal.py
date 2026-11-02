@@ -5,7 +5,7 @@ import json
 import httpx
 
 STATE = {"orders": 0, "fail_next": False, "error_next": False, "calls": [], "by_request_id": {}, "refunds": [],
-         "by_order_id": {}, "pending_next": False}
+         "by_order_id": {}, "pending_next": False, "setup_approved": False}
 
 
 def handler(req: httpx.Request):
@@ -20,6 +20,9 @@ def handler(req: httpx.Request):
         assert b["payment_source"]["paypal"]["usage_type"] == "MERCHANT"
         return httpx.Response(201, json={"id": "ST1", "status": "PAYER_ACTION_REQUIRED",
                                          "links": [{"rel": "approve", "href": "https://sandbox.paypal.com/approve?t=ST1"}]})
+    if req.method == "GET" and path.startswith("/v3/vault/setup-tokens/"):
+        st = "APPROVED" if STATE["setup_approved"] else "PAYER_ACTION_REQUIRED"
+        return httpx.Response(200, json={"id": path.rsplit("/", 1)[1], "status": st})
     if path == "/v3/vault/payment-tokens":
         return httpx.Response(201, json={"id": "VAULT1", "payment_source": {"paypal": {"email_address": "o@example.com"}}})
     if req.method == "GET" and path.startswith("/v2/checkout/orders/"):

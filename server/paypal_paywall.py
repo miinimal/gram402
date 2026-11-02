@@ -87,7 +87,7 @@ def paypal_paywall(app, prices, db_path=None, gram=None, description=""):
         secret = hdrs.get("x-mandate-secret")
         with db() as c:
             if method == "GET" and not tail:
-                st = paypal402.status(c, mid, secret)
+                st = await paypal402.refresh(c, mid, secret)
                 return await reply(send, 200, st) if st else await reply(send, 404, {"error": "unknown mandate or wrong secret"})
             if method == "DELETE" and not tail:
                 ok = paypal402.revoke(c, mid, secret)

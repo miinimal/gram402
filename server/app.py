@@ -157,9 +157,9 @@ def mandate_cancelled(mid: str, request: Request):
 
 
 @app.get("/v1/mandates/{mid}")
-def mandate_status(mid: str, x_mandate_secret: str = Header(None)):
+async def mandate_status(mid: str, x_mandate_secret: str = Header(None)):
     with db() as c:
-        r = paypal402.status(c, mid, x_mandate_secret)
+        r = await paypal402.refresh(c, mid, x_mandate_secret)
     if not r:
         raise HTTPException(404, "unknown mandate or wrong secret")
     return r

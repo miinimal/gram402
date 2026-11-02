@@ -2,12 +2,15 @@
 
     python3 demo/paypal_agent_demo.py            # offline: simulated PayPal, no account needed
     PAYPAL_CLIENT_ID=... PAYPAL_CLIENT_SECRET=... python3 demo/paypal_agent_demo.py   # live PayPal sandbox
+    DEMO_PHASE=create|run DEMO_STATE=file ...   # split run (CI): create prints the approval link and exits;
+                                                # run waits until PayPal reports the approval, then the agent pays
 
 Story: the owner gives the agent a 0.25 USD budget, at most 0.10 USD per request, valid 7 days, for one endpoint
 only. The agent asks questions, hits HTTP 402, pays from the mandate on its own, gets answers with signed receipts
 bound to PayPal captures, and is stopped by the budget. Then the owner revokes the mandate.
 Author: Aleksandr Shcherbakov (@miinimal).
 """
+import json
 import os
 import sys
 import tempfile
@@ -45,7 +48,6 @@ def say(who, text):
 
 
 def owner_post(path, body):
-    import json
     req = urllib.request.Request(BASE + path, data=json.dumps(body).encode(), method="POST",
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=60) as r:
@@ -59,15 +61,36 @@ def main():
         time.sleep(0.1)
     say("setup", "PayPal: " + ("LIVE SANDBOX" if LIVE else "SIMULATED (no credentials given)") + f"; server {BASE}")
 
-    say("owner", "Creating a spending mandate: budget 0.25 USD, max 0.10 USD per request, 7 days, chat endpoint only")
-    m = owner_post("/v1/mandates", {"budget_cents": 25, "per_request_cents": 10, "days": 7,
-                                    "resources": ["/v1/chat/completions"]})
-    say("owner", f"Mandate {m['mandate']} created. Approve it once on PayPal:\n        {m['approve_url']}")
+    phase, state = os.environ.get("DEMO_PHASE", ""), os.environ.get("DEMO_STATE", "")
+    if phase == "run":
+        with open(state) as f:
+            m = json.load(f)
+        say("owner", f"Resuming mandate {m['mandate']}")
+    else:
+        say("owner", "Creating a spending mandate: budget 0.25 USD, max 0.10 USD per request, 7 days, chat endpoint only")
+        m = owner_post("/v1/mandates", {"budget_cents": 25, "per_request_cents": 10, "days": 7,
+                                        "resources": ["/v1/chat/completions"]})
+        say("owner", f"Mandate {m['mandate']} created. Approve it once on PayPal:\n        {m['approve_url']}")
+    if phase == "create":
+        fd = os.open(state, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump({"mandate": m["mandate"], "secret": m["secret"]}, f)
+        if os.environ.get("GITHUB_ACTIONS"):
+            print(f"::notice title=Approve the PayPal sandbox mandate::{m['approve_url']}", flush=True)
+        server.should_exit = True
+        return
     agent = MandateClient(BASE, m["mandate"], m["secret"], max_cents=10)
+    if os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+            f.write(f"## PayPal {'sandbox (live API)' if LIVE else 'simulated'} run, mandate `{m['mandate']}`\n\n"
+                    "| Request | Cents | PayPal capture | Budget left | Receipt valid |\n|---|---|---|---|---|\n")
     if LIVE:
-        say("owner", "Waiting for approval in the browser (log in with a PayPal sandbox buyer account)...")
+        say("owner", "Waiting for approval on PayPal (log in with a PayPal sandbox buyer account)...")
+        deadline = time.time() + int(os.environ.get("DEMO_APPROVE_WAIT_S", "1200"))
         while agent.status()["status"] != "active":
-            time.sleep(3)
+            if time.time() > deadline:
+                raise SystemExit("mandate was not approved in time")
+            time.sleep(6)
     else:
         urllib.request.urlopen(f"{BASE}/v1/mandates/{m['mandate']}/approved").read()
     say("owner", "Approved. From now on the agent pays on its own, within the limits.")
@@ -84,6 +107,9 @@ def main():
         say("agent", f"Answer: {out['choices'][0]['message']['content']}\n"
                      f"        Paid {p['charged_cents']} cents via PayPal, capture {p['transaction']}, "
                      f"budget left {p['mandate_left_cents']} cents, receipt signature valid: {ok}")
+        if os.environ.get("GITHUB_STEP_SUMMARY"):
+            with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+                f.write(f"| {q} | {p['charged_cents']} | `{p['transaction']}` | {p['mandate_left_cents']} | {ok} |\n")
 
     st = agent.status()
     say("owner", f"Mandate status: spent {st['spent_cents']} of {st['budget_cents']} cents. Revoking it.")
