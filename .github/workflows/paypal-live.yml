@@ -2,7 +2,8 @@ name: paypal-live
 # Live PayPal sandbox run of the agent demo. Needs repository secrets PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET
 # (sandbox app); without them it runs against the simulated PayPal. Step "create" ends with a notice carrying the
 # approval link: open it, log in with a PayPal sandbox buyer (Personal) account and approve. Step "run" waits up to
-# 20 minutes for PayPal to report the approval, then the agent pays on its own; captures go to the job summary.
+# 20 minutes for PayPal to report the approval, then the agent pays on its own; captures go to the job summary and
+# the owner page is screen-recorded (artifact owner-page-recordings) for the demo video.
 on:
   workflow_dispatch:
 permissions:
@@ -21,8 +22,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
-      - run: pip install -q -r server/requirements.txt
+      - run: pip install -q -r server/requirements.txt playwright && python -m playwright install --with-deps chromium
       - name: create
-        run: GRAM402_DB=$RUNNER_TEMP/demo.db DEMO_STATE=$RUNNER_TEMP/mandate.json DEMO_PHASE=create python3 demo/paypal_agent_demo.py
+        run: GRAM402_DB=$RUNNER_TEMP/demo.db DEMO_STATE=$RUNNER_TEMP/mandate.json DEMO_RECORD_DIR=$RUNNER_TEMP/rec DEMO_PHASE=create python3 demo/paypal_agent_demo.py
       - name: run
-        run: GRAM402_DB=$RUNNER_TEMP/demo.db DEMO_STATE=$RUNNER_TEMP/mandate.json DEMO_PHASE=run python3 demo/paypal_agent_demo.py
+        run: GRAM402_DB=$RUNNER_TEMP/demo.db DEMO_STATE=$RUNNER_TEMP/mandate.json DEMO_RECORD_DIR=$RUNNER_TEMP/rec DEMO_PHASE=run python3 demo/paypal_agent_demo.py
+      - name: recordings of the owner page (sandbox; the mandate is revoked at the end of the run)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with: {name: owner-page-recordings, path: "${{ runner.temp }}/rec/*.webm", if-no-files-found: ignore, retention-days: 14}

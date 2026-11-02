@@ -12,6 +12,7 @@ Author: Aleksandr Shcherbakov (@miinimal).
 """
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -41,6 +42,8 @@ if not LIVE:
     paypal402._transport = fake_paypal.transport()
 
 BASE = f"http://localhost:{PORT}"
+REC = os.environ.get("DEMO_RECORD_DIR", "")  # record the owner page (needs playwright + chromium)
+REC_SCRIPT = os.path.join(ROOT, "demo", "record_owner.py")
 
 
 def say(who, text):
@@ -66,15 +69,22 @@ def main():
         with open(state) as f:
             m = json.load(f)
         say("owner", f"Resuming mandate {m['mandate']}")
+    elif REC and phase == "create":
+        say("owner", "Creating a spending mandate on the owner page: budget 0.25 USD, max 0.10 USD per request, 7 days")
+        subprocess.run([sys.executable, REC_SCRIPT, "create", BASE, state, REC], check=True, stdout=subprocess.DEVNULL)
+        with open(state) as f:
+            m = json.load(f)
+        say("owner", f"Mandate {m['mandate']} created. Approve it once on PayPal:\n        {m['approve_url']}")
     else:
         say("owner", "Creating a spending mandate: budget 0.25 USD, max 0.10 USD per request, 7 days, chat endpoint only")
         m = owner_post("/v1/mandates", {"budget_cents": 25, "per_request_cents": 10, "days": 7,
                                         "resources": ["/v1/chat/completions"]})
         say("owner", f"Mandate {m['mandate']} created. Approve it once on PayPal:\n        {m['approve_url']}")
-    if phase == "create":
+    if phase == "create" and not REC:
         fd = os.open(state, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w") as f:
             json.dump({"mandate": m["mandate"], "secret": m["secret"]}, f)
+    if phase == "create":
         if os.environ.get("GITHUB_ACTIONS"):
             print(f"::notice title=Approve the PayPal sandbox mandate::{m['approve_url']}", flush=True)
         server.should_exit = True
@@ -94,8 +104,14 @@ def main():
     else:
         urllib.request.urlopen(f"{BASE}/v1/mandates/{m['mandate']}/approved").read()
     say("owner", "Approved. From now on the agent pays on its own, within the limits.")
+    rec, stop = None, (state or tempfile.mktemp()) + ".stop"
+    if REC:
+        rec = subprocess.Popen([sys.executable, REC_SCRIPT, "watch", BASE, state, REC, stop])
+        time.sleep(6)  # the page is open before the first payment
 
     for q in ["What is GRAM-402?", "Summarize the TON blockchain in one line.", "One more question, please."]:
+        if rec:
+            time.sleep(5)  # let the recording show each payment arrive
         say("agent", f"Asking: {q}")
         try:
             out = agent.chat({"model": "echo", "messages": [{"role": "user", "content": q}]})
@@ -111,6 +127,8 @@ def main():
             with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
                 f.write(f"| {q} | {p['charged_cents']} | `{p['transaction']}` | {p['mandate_left_cents']} | {ok} |\n")
 
+    if rec:
+        time.sleep(6)
     st = agent.status()
     say("owner", f"Mandate status: spent {st['spent_cents']} of {st['budget_cents']} cents. Revoking it.")
     req = urllib.request.Request(f"{BASE}/v1/mandates/{m['mandate']}", method="DELETE",
@@ -120,6 +138,9 @@ def main():
         agent.chat({"model": "echo", "messages": [{"role": "user", "content": "after revoke"}]})
     except PaymentError as e:
         say("agent", f"After revoke: {e}")
+    if rec:
+        open(stop, "w").close()
+        rec.wait(timeout=120)
     server.should_exit = True
 
 
