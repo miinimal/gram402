@@ -11,6 +11,7 @@ jobs:
         with: {node-version: "20"}
       - run: pip install -r server/requirements.txt
       - run: cd server && python3 test_app.py
+      - run: cd server && python3 test_paypal.py
       - run: python3 clients/python/test_gram402.py
       - run: python3 clients/python/test_minimalai_receipt.py
       - run: python3 clients/python/test_gram402_merchant.py

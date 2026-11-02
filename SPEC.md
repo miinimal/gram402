@@ -164,3 +164,37 @@ Merchant helper: [`clients/python/gram402_merchant.py`](clients/python/gram402_m
 - top-up of an existing account: comment `mai:k:<account id>`, no new key;
 - wallet-signed requests instead of the key (TON Connect `ton_proof` style), so the wallet itself is the credential;
 - npm and PyPI packages for the clients above.
+
+## PayPal mandate rail (`paypal-mandate`)
+
+Status: draft v0.1 (2026-11-02). Reference implementation: `server/paypal402.py`, tests `server/test_paypal.py`.
+
+Agents whose owner has no crypto can pay the same 402 endpoint from a PayPal account. The owner approves a spending
+mandate once on PayPal; after that the agent pays per request with no human in the loop, strictly within the limits.
+
+Mandate (owner side):
+
+| Call | Effect |
+|------|--------|
+| `POST /v1/mandates {budget_cents, per_request_cents, days, resources?}` | creates a pending mandate and a PayPal Vault v3 setup token; returns `mandate`, `secret` (once) and `approve_url` |
+| owner opens `approve_url`, approves on PayPal | PayPal redirects to `/v1/mandates/{id}/approved`; the server stores the vault payment token; status `active` |
+| `GET /v1/mandates/{id}` + header `X-Mandate-Secret` | status, budget, spent, left, expiry |
+| `DELETE /v1/mandates/{id}` + header `X-Mandate-Secret` | revokes the mandate at once |
+
+Payment (agent side): the 402 `accepts` list carries a second entry next to `ton-transfer`:
+
+```json
+{"scheme": "paypal-mandate", "network": "paypal-sandbox", "asset": "USD", "maxAmountRequired": "5",
+ "extra": {"invoice": "p_1a2b3c4d5e6f7a8b", "decimals": 2, "mandateUrl": "https://host/v1/mandates"}}
+```
+
+The agent repeats the request with `X-PAYMENT = base64 JSON {x402Version:1, scheme:"paypal-mandate",
+payload:{mandate, secret, invoice}}`. The server checks, in order: mandate secret, status `active`, expiry, invoice
+open and not expired, resource allowlist, per-request cap, remaining budget. It reserves the amount, captures a PayPal
+order against the vaulted account (Orders v2, `stored_credential.payment_initiator = MERCHANT`) with idempotency keys,
+and only then runs the request. A failed capture releases the reservation. The answer carries a receipt whose
+`payment` block holds `{network: "paypal-<env>", transaction: <capture id>, payer: <mandate id>, charged_cents,
+currency}`, signed like every GRAM-402 receipt.
+
+Security: mandate secrets are stored as SHA-256 hashes; the PayPal vault id never leaves the server; every PayPal call
+uses a `PayPal-Request-Id`, so a retried capture cannot charge twice; an invoice settles at most once.
