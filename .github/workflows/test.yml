@@ -25,6 +25,7 @@ jobs:
       - run: ./clients/typescript/test.sh
       - run: ./clients/typescript/test_merchant.sh
       - run: ./clients/typescript/test_paypal.sh
+      - run: ./clients/typescript/test_near.sh
       - name: PayPal sandbox live check (skipped without secrets)
         run: cd server && python3 smoke_paypal_sandbox.py
         env:

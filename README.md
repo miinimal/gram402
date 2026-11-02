@@ -165,7 +165,7 @@ Live run on NEAR testnet (CI workflow `near-e2e`, 2026-11-02):
 | Sandboxed agent still pays through the mandate | [ChgEQwAk…](https://testnet.nearblocks.io/txns/ChgEQwAkw2EEt5pepeZFx2U6SrnADEmggoERZJnFtia3) |
 | Sandboxed agent tries to send NEAR directly: cannot be signed, a transfer needs a full-access key the agent no longer has | — |
 
-Agent side: `clients/python/near_mandate.py` — `NearMandateClient(url, mandate_id, pay=...)` answers 402 by calling
+Agent side: `clients/python/near_mandate.py` and `clients/typescript/near_mandate.ts` — `NearMandateClient(url, mandate_id, pay)` answers 402 by calling
 `pay` on the contract through your signing callback (any NEAR library or near-cli-rs), with its own price cap.
 
 Contract: [mandate.g4021793638522-owner.testnet](https://testnet.nearblocks.io/address/mandate.g4021793638522-owner.testnet).
