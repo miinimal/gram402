@@ -1,0 +1,29 @@
+name: near
+# NEAR mandate contract: unit tests and a deployable wasm (cargo-near), uploaded as an artifact.
+on:
+  push:
+    branches: [main]
+    paths: ["near/**", ".github/workflows/near.yml"]
+  pull_request:
+    paths: ["near/**"]
+  workflow_dispatch:
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    defaults: {run: {working-directory: near/contract}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            near/contract/target
+          key: near-${{ hashFiles('near/contract/Cargo.toml') }}
+      - run: cargo test --quiet
+      - name: install cargo-near
+        run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/cargo-near/releases/latest/download/cargo-near-installer.sh | sh
+      - run: cargo near build non-reproducible-wasm
+      - run: ls -la target/near && sha256sum target/near/*.wasm
+      - uses: actions/upload-artifact@v4
+        with: {name: near-mandate-wasm, path: near/contract/target/near/*.wasm}
