@@ -110,7 +110,8 @@ Every answer carries a receipt signed with the server's Ed25519 key (MINIMAL AI 
 request hash, response hash, model, route, time and, on COCOON mainnet, the latest RA-TLS evidence of the proxy
 (TDX quote bound to its TLS key, image hash on the root contract allowlist). For GRAM-402 requests the signed
 receipt also carries `payment: {network, transaction, payer, charged_nano}`, so the on-chain transfer, the request
-and the answer are bound by one signature. Verify with `POST /v1/receipts/verify`.
+and the answer are bound by one signature. Verify with `POST /v1/receipts/verify`, or offline with the pinned key as
+described in [RECEIPTS.md](RECEIPTS.md) (portable format, disputes linked to receipts).
 On the community testnet TEE is not enforced, and receipts state `tee_attested: false`.
 
 ## Clients

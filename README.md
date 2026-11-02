@@ -24,6 +24,8 @@ agent ── POST + X-PAYMENT {invoice, secret} ▶ server: finds the transfer, 
 | [`server/app.py`](server/app.py) | Reference server: any OpenAI-compatible chat API, paid per request |
 | [`clients/python/gram402.py`](clients/python/gram402.py) | Python client, stdlib only |
 | [`clients/typescript/gram402.ts`](clients/typescript/gram402.ts) | TypeScript client, no dependencies |
+| [`RECEIPTS.md`](RECEIPTS.md) | RECEIPTS v1: portable signed receipts, key pinning, disputes linked by `receipt_id` |
+| [`clients/python/minimalai_receipt.py`](clients/python/minimalai_receipt.py) | Offline receipt verifier (pinned key, no call to the issuer) |
 
 ## Run the reference server
 
