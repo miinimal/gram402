@@ -16,7 +16,7 @@ import time
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 import pay402
 import paypal402
@@ -88,18 +88,47 @@ async def mandate_create(request: Request):
                                               b.get("days", 30), b.get("resources"))
 
 
+OWNER_PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "owner.html")
+
+
+@app.get("/mandates", response_class=HTMLResponse)
+def owner_page():
+    """Owner UI: create a mandate, approve it on PayPal, watch spending, revoke."""
+    return HTMLResponse(open(OWNER_PAGE, encoding="utf-8").read())
+
+
+def _result_page(title, text, ok):
+    color = "#16834a" if ok else "#5d6e7e"
+    return HTMLResponse(f"""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title}</title><body style="margin:0;font:16px/1.5 system-ui,sans-serif;background:#f2f5f8;color:#0f1d2b">
+<main style="max-width:480px;margin:15vh auto 0;padding:0 16px"><h1 style="color:{color};font-size:24px">{title}</h1>
+<p>{text}</p><p><a href="/mandates" style="color:#0070e0">Check spending or revoke</a></p></main></body>""")
+
+
+def _wants_html(request):
+    return "text/html" in (request.headers.get("accept") or "")
+
+
 @app.get("/v1/mandates/{mid}/approved")
-async def mandate_approved(mid: str):
+async def mandate_approved(mid: str, request: Request):
     with db() as c:
         r = await paypal402.activate(c, mid)
     if not r["ok"]:
+        if _wants_html(request):
+            return _result_page("Mandate not activated", "PayPal approval could not be confirmed: " + r["error"], False)
         raise HTTPException(400, r["error"])
-    return {"mandate": mid, "status": "active", "message": "Mandate approved. Your agent can now pay within its limits."}
+    msg = "Mandate approved. Your agent can now pay within its limits."
+    if _wants_html(request):
+        return _result_page("Mandate approved", msg + " You can return to your agent.", True)
+    return {"mandate": mid, "status": "active", "message": msg}
 
 
 @app.get("/v1/mandates/{mid}/cancelled")
-def mandate_cancelled(mid: str):
-    return {"mandate": mid, "status": "pending", "message": "Approval cancelled on PayPal; nothing was charged."}
+def mandate_cancelled(mid: str, request: Request):
+    msg = "Approval cancelled on PayPal; nothing was charged."
+    if _wants_html(request):
+        return _result_page("Approval cancelled", msg, False)
+    return {"mandate": mid, "status": "pending", "message": msg}
 
 
 @app.get("/v1/mandates/{mid}")

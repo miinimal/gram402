@@ -108,4 +108,13 @@ with A.db() as c:
     row = c.execute("SELECT * FROM pp_mandates WHERE id=?", (m["mandate"],)).fetchone()
     assert row["secret_hash"] != m["secret"] and m["secret"] not in json.dumps(dict(row))
 
+# 12. Owner page and browser-facing approval result.
+r = cl.get("/mandates")
+assert r.status_code == 200 and "Agent spending mandates" in r.text
+m3 = cl.post("/v1/mandates", json={"budget_cents": 50, "per_request_cents": 10, "days": 1}).json()
+r = cl.get(f"/v1/mandates/{m3['mandate']}/approved", headers={"Accept": "text/html"})
+assert r.status_code == 200 and "Mandate approved" in r.text
+r = cl.get("/v1/mandates/m_unknown/approved", headers={"Accept": "text/html"})
+assert "not activated" in r.text
+
 print("paypal rail: all tests passed;", STATE["orders"], "captures,", len(STATE["calls"]), "PayPal calls")
