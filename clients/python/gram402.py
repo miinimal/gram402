@@ -65,7 +65,7 @@ class Gram402Client:
             pay = (out.get("gram402") or out.get("minimalai") or {}).get("payment")
             if pay:
                 self.api_key, self.last_payment = pay["api_key"], pay
-            if st == 402 and any(k.lower() == "retry-after" for k in hd) and time.time() < deadline:
+            if st in (402, 503) and any(k.lower() == "retry-after" for k in hd) and time.time() < deadline:
                 time.sleep(self.poll_s)
                 continue
             return self._done(st, out)
@@ -116,7 +116,7 @@ class Gram402Client:
         deadline = time.time() + self.wait_s
         while True:
             st, hd, out = send({"X-PAYMENT": xpay})
-            if st == 402 and any(k.lower() == "retry-after" for k in hd) and time.time() < deadline:
+            if st in (402, 503) and any(k.lower() == "retry-after" for k in hd) and time.time() < deadline:
                 time.sleep(self.poll_s)
                 continue
             self.last_payment = next((v for k, v in hd.items() if k.lower() == "x-payment-response"), None)

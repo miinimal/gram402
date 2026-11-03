@@ -59,7 +59,7 @@ export class Gram402Client {
       const r = await this.post(body, { 'X-PAYMENT': xpay });
       const p = r.json?.gram402?.payment ?? r.json?.minimalai?.payment;
       if (p) { this.apiKey = p.api_key; this.lastPayment = p; }
-      if (r.status === 402 && r.retry && Date.now() < deadline) { await new Promise((s) => setTimeout(s, this.pollMs)); continue; }
+      if ((r.status === 402 || r.status === 503) && r.retry && Date.now() < deadline) { await new Promise((s) => setTimeout(s, this.pollMs)); continue; }
       return done(r);
     }
   }
@@ -82,7 +82,7 @@ export class Gram402Client {
     const deadline = Date.now() + this.waitMs;
     for (;;) {
       const r = await send({ 'X-PAYMENT': xpay });
-      if (r.status === 402 && r.headers.has('retry-after') && Date.now() < deadline) {
+      if ((r.status === 402 || r.status === 503) && r.headers.has('retry-after') && Date.now() < deadline) {
         await new Promise((s) => setTimeout(s, this.pollMs)); continue;
       }
       this.lastPayment = r.headers.get('x-payment-response') ?? undefined;
