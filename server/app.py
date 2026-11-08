@@ -111,6 +111,8 @@ async def mandate_create(request: Request):
                                                   ip=_ip(request))
     except paypal402.RateLimited as e:
         raise HTTPException(429, str(e))
+    except paypal402.Declined as e:  # PayPal refused (credentials, permissions, sandbox outage): say so, not a 500
+        raise HTTPException(502, f"PayPal declined the request: {e}")
 
 
 @app.on_event("startup")
