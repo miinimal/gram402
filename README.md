@@ -17,7 +17,7 @@ payment.
 
 | Do this | See this |
 |---|---|
-| Open https://ai.minimalcult.org/gram402, create a mandate, approve it with a PayPal **sandbox** buyer | "Mandate approved"; then "Show spending" lists every charge with its PayPal capture id |
+| Run the server locally (see [Run it yourself](#run-it-yourself)), open http://localhost:8402/mandates, create a mandate, approve it with a PayPal **sandbox** buyer | "Mandate approved"; then "Show spending" lists every charge with its PayPal capture id |
 | `python3 demo/paypal_agent_demo.py` (no account needed, simulated PayPal) | the agent pays twice, is stopped by the budget, then refused after revoke |
 | Live PayPal sandbox run [41516703950](https://github.com/miinimal/gram402/actions/runs/41516703950) | captures `4AL30836MY6733008` and `3TJ7308016156922W`, budget stop, revoke |
 | NEAR testnet run (section [NEAR mandates](#near-mandates-limits-enforced-by-a-smart-contract)) | contract payments, over-cap payment refused on chain |
@@ -79,7 +79,7 @@ chain, keeps the returned key for the remaining credit and pays again when it ru
 
 No chain code on your side: the hosted facilitator issues invoices to your own wallet and confirms payments on chain.
 Agents pay you directly; the facilitator never holds the money. Fee: max(0.001 GRAM, 0.5 %) per settled payment,
-taken from your facilitator key balance. Terms: `GET https://ai.minimalcult.org/v1/facilitator`; details in
+taken from your facilitator key balance. Terms: `GET <facilitator>/v1/facilitator`; details in
 [`SPEC.md`](SPEC.md#facilitator-for-other-apis).
 
 ```python
@@ -114,7 +114,7 @@ app.use(expressPaywall(m, { '/v1/weather': 20_000_000n }));                     
 An agent pays any such endpoint with the client: `Gram402Client(base, pay=...).call(url, method="GET")` (Python) or
 `new Gram402Client(base, pay).call(url)` (TypeScript).
 
-A key comes from `POST https://ai.minimalcult.org/v1/agents/onboard`; top it up for fees with the returned
+A key comes from `POST <facilitator>/v1/agents/onboard`; top it up for fees with the returned
 `top_up` comment.
 
 ## PayPal mandates: agents pay with PayPal, within limits the owner set once
@@ -224,7 +224,7 @@ NEAR HACKATHON: work for the hackathon starts at baseline commit `5f3ba49`; see
 
 ## Check an agent before you pay it
 
-Paying another agent is only safe when you know its record. The [agent registry](https://ai.minimalcult.org/registry)
+Paying another agent is only safe when you know its record. The agent registry
 ranks agents by independent earnings: paid work from counterparties the agent never paid back, so two accounts paying
 each other do not climb. One call returns a record signed with the issuer's Ed25519 key (the key is also written to TON
 in the daily anchor comment, see [RECEIPTS.md](RECEIPTS.md)); these modules verify it against a key you pin, reject old
@@ -258,7 +258,22 @@ pip install httpx
 python3 tools/x402probe.py https://api.example.com/paid
 ```
 
-Hosted, with a public evidence-backed table of real endpoints: https://ai.minimalcult.org/x402
+The hosted probe table is offline while the MINIMAL AI gateway is paused; run the probe locally as above.
+
+## Run it yourself
+
+```bash
+git clone https://github.com/miinimal/gram402 && cd gram402/server
+pip install -r requirements.txt
+python3 test_app.py && python3 test_paypal.py && python3 test_near.py   # offline, no keys needed
+# PayPal sandbox: create an app at https://developer.paypal.com/dashboard/applications/sandbox
+PAYPAL_CLIENT_ID=... PAYPAL_CLIENT_SECRET=... PAYPAL_ENV=sandbox PAYPAL_SANDBOX_ONLY=1 \
+  PUBLIC_URL=http://localhost:8402 uvicorn app:app --port 8402
+```
+
+Open http://localhost:8402/mandates, create a mandate and approve it with a sandbox buyer account
+(PayPal Developer Dashboard, Sandbox accounts, Personal). Without PayPal keys, `python3 demo/paypal_agent_demo.py`
+runs the same flow against a simulated PayPal.
 
 ## Security
 
@@ -273,7 +288,7 @@ Tests for all of the above: `cd server && python3 test_app.py`, `python3 clients
 
 ## Status
 
-v0.1. PayPal rail: live in the PayPal sandbox and in the hosted demo. NEAR rail: live on NEAR testnet. TON rail: running on TON mainnet in the MINIMAL AI gateway (`https://ai.minimalcult.org`, Cocoon confidential
+v0.1. PayPal rail: live in the PayPal sandbox (run locally, see below; CI run linked above). NEAR rail: live on NEAR testnet. TON rail: ran on TON mainnet in the MINIMAL AI gateway (currently paused; Cocoon confidential
 inference): paid chat requests, top-up of an existing account by comment, and the facilitator for other APIs.
 Next: wallet-signed requests (TON Connect proof), packages on PyPI and npm.
 
