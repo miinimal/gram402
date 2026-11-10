@@ -24,6 +24,8 @@ LOG=e2e.log
 : > $LOG
 mkdir -p "$CRED"
 near_tx() { near "$@" network-config "$NET" sign-with-legacy-keychain send; }
+# transfers to a brand-new implicit account: --quiet skips near-cli's interactive "account does not exist" prompt
+near_new() { near --quiet tokens "$1" send-near "$2" "$3" network-config "$NET" sign-with-legacy-keychain send; }
 yocto_balance() {
   curl -s -m 20 "$RPC" -H 'content-type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"query\",\"params\":{\"request_type\":\"view_account\",\"finality\":\"final\",\"account_id\":\"$1\"}}" \
     | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("result",{}).get("amount","0"))'
@@ -60,15 +62,15 @@ else
   SPONSOR=$TAG.testnet
   near account create-account sponsor-by-faucet-service "$SPONSOR" autogenerate-new-keypair save-to-legacy-keychain network-config testnet create
   sleep 5
-  near_tx tokens "$SPONSOR" send-near "$FUNDER" '1.9 NEAR'
+  near_new "$SPONSOR" "$FUNDER" '1.9 NEAR'
   OWNER_ACCOUNT=${OWNER_ACCOUNT:-$SPONSOR}
   until python3 -c "import sys; sys.exit(0 if int('$(yocto_balance "$FUNDER")') >= $NEED else 1)"; do sleep 3; done
 fi
 echo "== funded: $(yocto_balance "$FUNDER") yocto on $FUNDER" | tee -a $LOG
 
-near_tx tokens "$FUNDER" send-near "$CONTRACT" '1.5 NEAR'
-near_tx tokens "$FUNDER" send-near "$AGENT" '0.1 NEAR'
-near_tx tokens "$FUNDER" send-near "$MERCHANT" '0.05 NEAR'
+near_new "$FUNDER" "$CONTRACT" '1.5 NEAR'
+near_new "$FUNDER" "$AGENT" '0.1 NEAR'
+near_new "$FUNDER" "$MERCHANT" '0.05 NEAR'
 near_tx contract deploy "$CONTRACT" use-file "$WASM" with-init-call new json-args '{}' prepaid-gas '30 Tgas' attached-deposit '0 NEAR'
 
 PRICE=1000000000000000000000      # 0.001 NEAR per request
