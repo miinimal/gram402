@@ -292,4 +292,16 @@ v0.1. PayPal rail: live in the PayPal sandbox (run locally, see below; CI run li
 inference): paid chat requests, top-up of an existing account by comment, and the facilitator for other APIs.
 Next: wallet-signed requests (TON Connect proof), packages on PyPI and npm.
 
+## Built with
+
+Python 3 with FastAPI, Uvicorn, HTTPX and cryptography (`server/requirements.txt`); the NEAR contract in Rust with
+near-sdk 5.30.0; near-cli-rs in the CI workflows; PayPal REST APIs (Orders v2, Vault v3) in the PayPal sandbox.
+TypeScript clients have no dependencies; Python clients use only the standard library, except cryptography for offline
+receipt checks and the MCP Python SDK for the MCP server (`clients/python/mandate_mcp.py`); the merchant paywall test
+needs FastAPI and HTTPX; the AI-agent demo calls an OpenAI-compatible LLM API. No templates or boilerplate generators
+were used.
+
+AI use: most of the code and documentation were written with Claude (Anthropic) as a coding assistant; the author
+reviewed, ran and tested every part, and all on-chain and PayPal sandbox runs linked here are real runs.
+
 Author: Aleksandr Shcherbakov ([@miinimal](https://github.com/miinimal)). License: MIT.
