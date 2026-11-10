@@ -17,7 +17,7 @@ payment.
 
 | Do this | See this |
 |---|---|
-| Run the server locally (see [Run it yourself](#run-it-yourself)), open http://localhost:8402/mandates, create a mandate, approve it with a PayPal **sandbox** buyer | "Mandate approved"; then "Show spending" lists every charge with its PayPal capture id |
+| Open the hosted demo **https://gram402.minimalcult.org/mandates** (PayPal sandbox), create a mandate, approve it with a PayPal **sandbox** buyer; or run the same server locally (see [Run it yourself](#run-it-yourself)) and open http://localhost:8402/mandates | "Mandate approved"; then "Show spending" lists every charge with its PayPal capture id |
 | `python3 demo/paypal_agent_demo.py` (no account needed, simulated PayPal) | the agent pays twice, is stopped by the budget, then refused after revoke |
 | Live PayPal sandbox run [41516703950](https://github.com/miinimal/gram402/actions/runs/41516703950) | captures `4AL30836MY6733008` and `3TJ7308016156922W`, budget stop, revoke |
 | NEAR testnet run (section [NEAR mandates](#near-mandates-limits-enforced-by-a-smart-contract)) | contract payments, over-cap payment refused on chain |
