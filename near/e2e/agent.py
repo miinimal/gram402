@@ -1,4 +1,4 @@
-"""Live end-to-end on NEAR testnet: an agent hits HTTP 402, pays through the mandate contract, gets the answer.
+"""Live end-to-end on NEAR (testnet by default, NEAR_NET=mainnet for the real-money run): an agent hits HTTP 402, pays through the mandate contract, gets the answer.
 
 Run by near/e2e/run.sh in CI. The payment is made with near-cli-rs signing as the agent account; the GRAM-402
 reference server verifies it with a view call on the contract. Author: Aleksandr Shcherbakov (@miinimal).
@@ -15,6 +15,7 @@ import urllib.request
 
 BASE = os.environ.get("GRAM402_URL", "http://127.0.0.1:8402")
 CONTRACT, AGENT, MANDATE = os.environ["CONTRACT"], os.environ["AGENT"], int(os.environ["MANDATE_ID"])
+NET = os.environ.get("NEAR_NET", "testnet")
 REQ = {"model": "echo", "messages": [{"role": "user", "content": "Hello from an agent paying on NEAR"}]}
 
 
@@ -31,7 +32,7 @@ def post(headers=None):
 def near_pay(args):
     cmd = ["near", "contract", "call-function", "as-transaction", CONTRACT, "pay", "json-args",
            json.dumps({"mandate_id": MANDATE, **args}), "prepaid-gas", "30 Tgas", "attached-deposit", "0 NEAR",
-           "sign-as", AGENT, "network-config", "testnet", "sign-with-legacy-keychain", "send"]
+           "sign-as", AGENT, "network-config", NET, "sign-with-legacy-keychain", "send"]
     p = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
     out = p.stdout + p.stderr
     print(out[-1500:], flush=True)

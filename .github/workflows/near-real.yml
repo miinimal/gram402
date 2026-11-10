@@ -1,0 +1,53 @@
+name: near-real
+# NEAR run with throwaway accounts. testnet = rehearsal (faucet funds). mainnet = real money: the job prints one
+# address, the owner sends NEAR from his wallet, the job runs the payments and returns the rest to owner_account.
+on:
+  workflow_dispatch:
+    inputs:
+      net:
+        description: testnet (rehearsal) or mainnet (real money)
+        type: choice
+        options: [testnet, mainnet]
+        default: testnet
+      owner_account:
+        description: where the rest goes back on mainnet
+        default: miinimal-hot.tg
+      max_wait_min:
+        description: minutes to wait for the owner's transfer (mainnet)
+        default: "60"
+concurrency: {group: near-real, cancel-in-progress: false}
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -r server/requirements.txt
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            near/contract/target
+          key: near-${{ hashFiles('near/contract/Cargo.toml') }}
+      - run: rustup target add wasm32-unknown-unknown
+      - name: install cargo-near and near-cli-rs
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/cargo-near/releases/latest/download/cargo-near-installer.sh | sh
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/near-cli-rs/releases/latest/download/near-cli-rs-installer.sh | sh
+      - name: build contract
+        working-directory: near/contract
+        run: cargo near build non-reproducible-wasm
+      - name: run with throwaway accounts
+        env:
+          NET: ${{ inputs.net }}
+          OWNER_ACCOUNT: ${{ inputs.net == 'mainnet' && inputs.owner_account || '' }}
+          MAX_WAIT_MIN: ${{ inputs.max_wait_min }}
+        run: WASM=$(ls $PWD/near/contract/target/near/*.wasm | head -1) bash near/e2e/run-ephemeral.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: near-real-log-${{ inputs.net }}
+          path: e2e.log
