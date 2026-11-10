@@ -1,0 +1,75 @@
+name: gram-real
+# One real GRAM payment on TON mainnet through GRAM-402, for the owner's own test. The server runs only inside this job
+# (never the hosted demo), with the owner's own receiving address: he pays from his phone wallet to his own address,
+# so the real cost is the network fee. The job prints the address, amount, comment and a ton:// link, waits for the
+# transfer, then checks the signed receipt. See tools/gram_real.py.
+on:
+  workflow_dispatch:
+    inputs:
+      pay_to:
+        description: receiving address (UQ.../EQ.../0:...) or a .ton name; the owner's own address
+        default: minimalcult.ton
+      amount_gram:
+        description: price of the one request in GRAM
+        default: "0.2"
+      max_wait_min:
+        description: minutes to wait for the transfer
+        default: "60"
+concurrency: {group: gram-real, cancel-in-progress: false}
+permissions: {contents: read}
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -r server/requirements.txt
+      - name: resolve the receiving address
+        id: addr
+        env:
+          PAY_TO: ${{ inputs.pay_to }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, sys, urllib.request
+          sys.path.insert(0, "tools")
+          import gram_real
+          v = os.environ["PAY_TO"].strip()
+          raw = None
+          if v.endswith(".ton"):
+              with urllib.request.urlopen(f"https://tonapi.io/v2/dns/{v}/resolve", timeout=20) as r:
+                  raw = json.load(r)["wallet"]["address"]
+          elif ":" in v:
+              raw = v
+          friendly = gram_real.friendly_address(raw) if raw else v
+          print(f"raw={raw or ''}")
+          print(f"friendly={friendly}")
+          PY
+          cat "$GITHUB_OUTPUT"
+      - name: start the server on mainnet (inside this job only)
+        env:
+          PAY402_NETWORK: mainnet
+          PAY402_ADDRESS: ${{ steps.addr.outputs.friendly }}
+          AMOUNT_GRAM: ${{ inputs.amount_gram }}
+          TONCENTER_API_KEY: ${{ secrets.TONCENTER_API_KEY }}
+          GRAM402_DB: ${{ runner.temp }}/gram-real.db
+        working-directory: server
+        run: |
+          export PAY402_MIN_NANO=$(python3 -c "import os; print(int(round(float(os.environ['AMOUNT_GRAM']) * 1e9)))")
+          export PRICE_NANO_PER_1K=1
+          nohup python3 -m uvicorn app:app --host 127.0.0.1 --port 8402 > "$RUNNER_TEMP/server.log" 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8402/health && break; sleep 1; done
+          curl -sf http://127.0.0.1:8402/health | grep -q '"network":"ton-mainnet"'
+      - name: wait for the owner's transfer and check the receipt
+        env:
+          MAX_WAIT_MIN: ${{ inputs.max_wait_min }}
+        run: python3 tools/gram_real.py --max-wait-min "$MAX_WAIT_MIN" | tee gram-real.log
+        shell: bash -o pipefail {0}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gram-real-log
+          path: |
+            gram-real.log
+            ${{ runner.temp }}/server.log
