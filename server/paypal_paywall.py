@@ -137,7 +137,8 @@ def paypal_paywall(app, prices, db_path=None, gram=None, description=""):
             with db() as c:
                 st = await paypal402.settle(c, claim, expect_resource=path, expect_cents=int(cents))
             if not st["ok"]:
-                return await reply(send, 402, {"x402Version": 1, "error": st["error"]},
+                return await reply(send, 402, {"x402Version": 1, "error": st["error"],
+                                               "error_detail": st.get("error_detail")},
                                    [(b"retry-after", b"5")] if st.get("retry") else [])
             hdr = paypal402.response_header(st).encode()
         elif gram is not None and nano:

@@ -111,8 +111,8 @@ async def mandate_create(request: Request):
                                                   ip=_ip(request))
     except paypal402.RateLimited as e:
         raise HTTPException(429, str(e))
-    except paypal402.Declined as e:  # PayPal refused (credentials, permissions, sandbox outage): say so, not a 500
-        raise HTTPException(502, f"PayPal declined the request: {e}")
+    except paypal402.ProviderError as e:  # PayPal refused or is down (credentials, permissions, outage): say so, not a 500
+        return JSONResponse({"detail": f"PayPal declined the request: {e}", "error_detail": e.detail}, status_code=502)
 
 
 @app.on_event("startup")
@@ -291,8 +291,8 @@ async def chat_paypal(body, claim):
         st = await paypal402.settle(c, claim, expect_resource="/v1/chat/completions",
                                     expect_cents=paypal402.PRICE_CENTS)
     if not st["ok"]:
-        return JSONResponse({"x402Version": 1, "error": st["error"]}, status_code=402,
-                            headers={"Retry-After": "5"} if st.get("retry") else None)
+        return JSONResponse({"x402Version": 1, "error": st["error"], "error_detail": st.get("error_detail")},
+                            status_code=402, headers={"Retry-After": "5"} if st.get("retry") else None)
     pay = {"network": st["network"], "transaction": st["transaction"], "payer": st["payer"], "charged_nano": None,
            "charged_cents": st["charged_cents"], "currency": paypal402.CURRENCY}
     try:

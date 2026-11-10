@@ -21,7 +21,7 @@ payment.
 | `python3 demo/paypal_agent_demo.py` (no account needed, simulated PayPal) | the agent pays twice, is stopped by the budget, then refused after revoke |
 | Live PayPal sandbox run [41516703950](https://github.com/miinimal/gram402/actions/runs/41516703950) | captures `4AL30836MY6733008` and `3TJ7308016156922W`, budget stop, revoke |
 | NEAR testnet run (section [NEAR mandates](#near-mandates-limits-enforced-by-a-smart-contract)) | contract payments, over-cap payment refused on chain |
-| `cd server && python3 test_app.py && python3 test_paypal.py && python3 test_near.py` | all rails tested offline |
+| `cd server && python3 test_app.py && python3 test_paypal.py && python3 test_paypal_concurrency.py && python3 test_near.py` | all rails tested offline, including two processes spending one budget at once and a crash after capture |
 
 The TON rail in detail:
 

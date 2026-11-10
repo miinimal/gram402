@@ -50,8 +50,58 @@ class RateLimited(Exception):
     pass
 
 
-class Declined(Exception):
+class ProviderError(Exception):
+    """A PayPal call failed. `detail` is the structured error object returned to clients (see SPEC.md, Errors)."""
+
+    def __init__(self, message, detail):
+        super().__init__(message)
+        self.detail = detail
+
+
+class Declined(ProviderError):
     """PayPal answered 4xx: the request was refused, nothing was charged."""
+
+
+class Unavailable(ProviderError, RuntimeError):
+    """PayPal answered 5xx: the outcome of the call is unknown."""
+
+
+# PayPal error names that a retry can never fix: the merchant's credentials or account setup are wrong.
+NON_RETRYABLE_NAMES = {"NOT_AUTHORIZED", "PERMISSION_DENIED", "AUTHENTICATION_FAILURE", "INVALID_CLIENT",
+                       "invalid_client", "UNAUTHORIZED"}
+
+
+def provider_detail(operation, status, text="", headers=None, correlation_id=None):
+    """Structured provider error object: stable code, provider fields, and whether repeating the call can help."""
+    try:
+        body = json.loads(text) if text else {}
+    except ValueError:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    name = body.get("name") or body.get("error") or None
+    debug_id = body.get("debug_id") or (headers or {}).get("paypal-debug-id")
+    if status in (401, 403) or name in NON_RETRYABLE_NAMES:
+        code, retryable = "PAYMENT_PROVIDER_CONFIGURATION_ERROR", False
+    elif status == 429:
+        code, retryable = "PAYMENT_PROVIDER_RATE_LIMITED", True
+    elif status is not None and status >= 500:
+        code, retryable = "PAYMENT_PROVIDER_UNAVAILABLE", True
+    else:
+        code, retryable = "PAYMENT_DECLINED", False
+    return {"code": code, "provider": "paypal", "operation": operation, "upstream_status": status,
+            "provider_error_name": name, "provider_debug_id": debug_id, "correlation_id": correlation_id,
+            "retryable": retryable}
+
+
+def error(message, code, retryable=False, **extra):
+    """Failure result of settle(): the human message stays in `error`, the machine-readable object in `error_detail`."""
+    d = {"code": code, "retryable": retryable}
+    d.update(extra)
+    out = {"ok": False, "error": message, "error_detail": d}
+    if retryable:
+        out["retry"] = True
+    return out
 
 
 _transport = None  # tests inject httpx.MockTransport
@@ -99,7 +149,9 @@ async def _auth(cl):
     if _token["value"] and _token["exp"] > time.time() + 60:
         return _token["value"]
     r = await cl.post("/v1/oauth2/token", data={"grant_type": "client_credentials"}, auth=(CLIENT_ID, CLIENT_SECRET))
-    r.raise_for_status()
+    if r.status_code >= 400:
+        d = provider_detail("POST /v1/oauth2/token", r.status_code, r.text, r.headers)
+        raise (Unavailable if r.status_code >= 500 else Declined)(f"paypal oauth {r.status_code}: {r.text[:300]}", d)
     d = r.json()
     _token.update(value=d["access_token"], exp=time.time() + int(d.get("expires_in", 300)))
     return _token["value"]
@@ -111,10 +163,9 @@ async def _call(method, path, body=None, request_id=None):
         if request_id:
             headers["PayPal-Request-Id"] = request_id
         r = await cl.request(method, path, json=body, headers=headers)
-        if 400 <= r.status_code < 500:
-            raise Declined(f"paypal {path} {r.status_code}: {r.text[:300]}")
-        if r.status_code >= 500:
-            raise RuntimeError(f"paypal {path} {r.status_code}: {r.text[:300]}")
+        if r.status_code >= 400:
+            d = provider_detail(f"{method} {path}", r.status_code, r.text, r.headers, request_id)
+            raise (Unavailable if r.status_code >= 500 else Declined)(f"paypal {path} {r.status_code}: {r.text[:300]}", d)
         return r.json() if r.content else {}
 
 
@@ -281,6 +332,18 @@ def _check(c, claim, now, expect_resource=None, expect_cents=None):
     return m, inv, False, None
 
 
+_CHECK_CODES = (  # message prefix of _check() -> stable code; none of these are fixed by repeating the same request
+    ("unknown mandate", "MANDATE_NOT_FOUND"), ("mandate is pending", "MANDATE_NOT_APPROVED"),
+    ("mandate is", "MANDATE_INACTIVE"), ("unknown or already used invoice", "INVOICE_INVALID"),
+    ("invoice is for another", "INVOICE_MISMATCH"), ("mandate expired", "MANDATE_EXPIRED"),
+    ("invoice expired", "INVOICE_EXPIRED"), ("resource not allowed", "RESOURCE_NOT_ALLOWED"),
+    ("price exceeds", "PER_REQUEST_CAP_EXCEEDED"), ("mandate budget exhausted", "BUDGET_EXHAUSTED"))
+
+
+def _check_code(msg):
+    return next((code for prefix, code in _CHECK_CODES if msg.startswith(prefix)), "PAYMENT_REJECTED")
+
+
 def _release(c, inv_id, mid, cents):
     """Undo a reservation only if this mandate still holds the invoice in 'paying' (never reopens a paid invoice)."""
     cur = c.execute("UPDATE pp_invoices SET status='open', mandate=NULL, order_id=NULL, paying_since=NULL "
@@ -332,7 +395,7 @@ async def settle(c, claim, now=None, expect_resource=None, expect_cents=None):
     now = now or int(time.time())
     m, inv, resume, err = _check(c, claim, now, expect_resource, expect_cents)
     if err:
-        return {"ok": False, "error": err}
+        return error(err, _check_code(err))
     if not resume:
         cur = c.execute("UPDATE pp_mandates SET spent_cents=spent_cents+? WHERE id=? AND spent_cents+?<=budget_cents",
                         (inv["amount_cents"], m["id"], inv["amount_cents"]))
@@ -340,29 +403,33 @@ async def settle(c, claim, now=None, expect_resource=None, expect_cents=None):
                          (m["id"], now, inv["id"]))
         if cur.rowcount != 1 or cur2.rowcount != 1:
             c.rollback()
-            return {"ok": False, "error": "concurrent payment; retry"}
+            return error("concurrent payment; retry", "CONCURRENT_PAYMENT", True)
         c.commit()
         inv = c.execute("SELECT * FROM pp_invoices WHERE id=?", (inv["id"],)).fetchone()
     try:
         order, cap = await _drive(c, m, inv, resume)
     except Declined as e:
         if resume and inv["order_id"]:
-            return {"ok": False, "retry": True, "error": "PayPal is still processing this payment; repeat later"}
+            return error("PayPal is still processing this payment; repeat later", "PAYMENT_PENDING", True)
         _release(c, inv["id"], m["id"], inv["amount_cents"])
-        return {"ok": False, "error": "PayPal refused the payment: " + str(e)[:200]}
+        return {"ok": False, "error": "PayPal refused the payment: " + str(e)[:200], "error_detail": e.detail}
     except Exception as e:  # noqa: BLE001
-        return {"ok": False, "retry": True, "error": "PayPal outcome unknown, nothing released; repeat the same request "
-                                                   "to finish the payment (" + str(e)[:120] + ")"}
+        d = dict(e.detail) if isinstance(e, ProviderError) else {"code": "PAYMENT_PROVIDER_UNAVAILABLE",
+                                                                 "provider": "paypal"}
+        d.update(code="PAYMENT_OUTCOME_UNKNOWN", retryable=True)  # the reservation is kept: repeating finishes it
+        return {"ok": False, "retry": True, "error_detail": d,
+                "error": "PayPal outcome unknown, nothing released; repeat the same request "
+                         "to finish the payment (" + str(e)[:120] + ")"}
     if not cap or order.get("status") != "COMPLETED" or cap.get("status") != "COMPLETED":
         if cap and cap.get("status") in ("DECLINED", "FAILED"):
             _release(c, inv["id"], m["id"], inv["amount_cents"])
-            return {"ok": False, "error": "PayPal declined the capture"}
-        return {"ok": False, "retry": True, "error": "PayPal capture is " + str((cap or {}).get("status")) + "; repeat later"}
+            return error("PayPal declined the capture", "PAYMENT_DECLINED", provider="paypal")
+        return error("PayPal capture is " + str((cap or {}).get("status")) + "; repeat later", "PAYMENT_PENDING", True)
     cur = c.execute("UPDATE pp_invoices SET status='paid', capture_id=? WHERE id=? AND status='paying' AND mandate=?",
                     (cap["id"], inv["id"], m["id"]))
     c.commit()
     if cur.rowcount != 1:  # a parallel retry already settled it: one payment, one answer
-        return {"ok": False, "error": "invoice already settled"}
+        return error("invoice already settled", "INVOICE_ALREADY_USED")
     spent = c.execute("SELECT spent_cents FROM pp_mandates WHERE id=?", (m["id"],)).fetchone()[0]
     return {"ok": True, "network": network_id(), "transaction": cap["id"], "payer": m["id"], "invoice": inv["id"],
             "charged_cents": inv["amount_cents"], "mandate_left_cents": m["budget_cents"] - spent}

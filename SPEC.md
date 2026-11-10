@@ -217,6 +217,37 @@ currency}`, signed like every GRAM-402 receipt.
 Security: mandate secrets are stored as SHA-256 hashes; the PayPal vault id never leaves the server; every PayPal call
 uses a `PayPal-Request-Id`, so a retried capture cannot charge twice; an invoice settles at most once.
 
+Errors: a refused payment answers `402` with `error` (a human-readable message, unchanged) and `error_detail`, a
+machine-readable object. `code` is stable; `retryable` says whether repeating the same request can succeed (it is
+`true` only together with a `Retry-After` header). Provider failures add `provider`, `operation`, `upstream_status`,
+`provider_error_name`, `provider_debug_id` (PayPal's debug id, for support) and `correlation_id` (the
+`PayPal-Request-Id` of the call).
+
+```json
+{"x402Version": 1, "error": "PayPal refused the payment: ...",
+ "error_detail": {"code": "PAYMENT_PROVIDER_CONFIGURATION_ERROR", "retryable": false, "provider": "paypal",
+                  "operation": "POST /v2/checkout/orders", "upstream_status": 403, "provider_error_name": "NOT_AUTHORIZED",
+                  "provider_debug_id": "f1c2...", "correlation_id": "order-p_1a2b...-m_9f8e..."}}
+```
+
+| `code` | `retryable` | Meaning |
+|---|---|---|
+| `MANDATE_NOT_FOUND` | no | unknown mandate or wrong secret |
+| `MANDATE_NOT_APPROVED` / `MANDATE_INACTIVE` / `MANDATE_EXPIRED` | no | the owner has not approved it, revoked it, or it expired |
+| `INVOICE_INVALID` / `INVOICE_EXPIRED` / `INVOICE_MISMATCH` | no | used, unknown, expired, or issued for another endpoint or price: get a new 402 |
+| `RESOURCE_NOT_ALLOWED` / `PER_REQUEST_CAP_EXCEEDED` / `BUDGET_EXHAUSTED` | no | outside the mandate's limits |
+| `CONCURRENT_PAYMENT` | yes | another request reserved the budget at the same moment |
+| `PAYMENT_DECLINED` | no | PayPal refused this payment; nothing was charged |
+| `PAYMENT_PROVIDER_CONFIGURATION_ERROR` | no | PayPal answered 401/403 or `NOT_AUTHORIZED`: the merchant's credentials or account setup are wrong |
+| `PAYMENT_PROVIDER_RATE_LIMITED` | yes | PayPal answered 429 |
+| `PAYMENT_PENDING` / `PAYMENT_OUTCOME_UNKNOWN` | yes | PayPal is still processing, or timed out / answered 5xx; the reservation is kept and the same request finishes the payment without a second charge |
+
+`POST /v1/mandates` answers `502` with the same `error_detail` when PayPal refuses or is down.
+
+Tested under stress in `server/test_paypal_concurrency.py`: separate processes spending one budget at the same moment
+(exactly one is charged), a crash after the capture but before the result is stored (the same request finishes it,
+one charge), and replay of an invoice across mandates and endpoints.
+
 ## NEAR mandate rail (`near-mandate`)
 
 Status: draft v0.2 (2026-11-02). Contract: `near/contract`; server: `server/near402.py`; clients:

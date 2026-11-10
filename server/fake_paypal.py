@@ -5,7 +5,8 @@ import json
 import httpx
 
 STATE = {"orders": 0, "fail_next": False, "error_next": False, "calls": [], "by_request_id": {}, "refunds": [],
-         "by_order_id": {}, "pending_next": False, "setup_approved": False}
+         "by_order_id": {}, "pending_next": False, "setup_approved": False,
+         "status_next": None, "oauth_fail": False}
 
 
 def handler(req: httpx.Request):
@@ -13,6 +14,8 @@ def handler(req: httpx.Request):
     STATE["calls"].append((req.method, path))
     if path == "/v1/oauth2/token":
         assert req.headers["authorization"].startswith("Basic ")
+        if STATE["oauth_fail"]:  # wrong client id/secret, as PayPal answers it
+            return httpx.Response(401, json={"error": "invalid_client", "error_description": "Client Authentication failed"})
         return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
     assert req.headers.get("authorization") == "Bearer tok"
     if path == "/v3/vault/setup-tokens":
@@ -31,6 +34,11 @@ def handler(req: httpx.Request):
     if path.startswith("/v2/payments/captures/") and path.endswith("/refund"):
         STATE["refunds"].append(path.split("/")[4])
         return httpx.Response(201, json={"id": "R1", "status": "COMPLETED"})
+    if path == "/v2/checkout/orders" and STATE["status_next"]:  # one forced PayPal error, e.g. (403, NOT_AUTHORIZED)
+        status, name = STATE["status_next"]
+        STATE["status_next"] = None
+        return httpx.Response(status, json={"name": name, "debug_id": "dbg-" + name.lower()},
+                              headers={"Paypal-Debug-Id": "dbg-" + name.lower()})
     if path == "/v2/checkout/orders":
         rid = req.headers.get("paypal-request-id", "")
         if rid in STATE["by_request_id"]:  # PayPal idempotency: same request id -> same result, no new charge
