@@ -5,7 +5,7 @@
 # waits; the owner sends NEAR to it from his own wallet. The job then deploys the mandate contract, lets an agent pay
 # HTTP 402 invoices through it, proves the agent's restricted key cannot move money directly, revokes the mandate,
 # deletes the throwaway accounts and returns everything that is left to the owner's account.
-# Real cost: network fees plus the two paid requests (about 0.002 NEAR) and the small balance left on the agent.
+# Real cost: network fees plus the two paid requests (about 0.002 NEAR) and about 0.06 NEAR left on the restricted agent.
 #
 # Env: NET=mainnet|testnet, OWNER_ACCOUNT (where the rest goes back; testnet defaults to the faucet account),
 # WASM (contract), MAX_WAIT_MIN (mainnet only).
@@ -88,9 +88,9 @@ for i in $(seq 1 40); do curl -sf -m 1 http://127.0.0.1:8402/health >/dev/null &
 NEAR_NET=$NET CONTRACT=$CONTRACT AGENT=$AGENT MANDATE_ID=1 CAP_YOCTO=$CAP python3 near/e2e/agent.py | tee -a $LOG
 
 # The agent keeps only a key that may call `pay` on the mandate contract; its direct transfer must fail.
-near_tx tokens "$AGENT" send-near "$FUNDER" '0.07 NEAR'    # leave the agent only what it needs for gas
+near_tx tokens "$AGENT" send-near "$FUNDER" '0.04 NEAR'    # leave the agent only what it needs for gas (one pay reserves about 0.031 NEAR)
 FULL_KEY=$(python3 -c "import json;print(json.load(open('$CRED/$AGENT.json'))['public_key'])")
-near_tx account add-key "$AGENT" grant-function-call-access --allowance '0.02 NEAR' --contract-account-id "$CONTRACT" \
+near_tx account add-key "$AGENT" grant-function-call-access --allowance '0.05 NEAR' --contract-account-id "$CONTRACT" \
   --function-names pay autogenerate-new-keypair save-to-legacy-keychain
 near_tx account delete-keys "$AGENT" public-keys "$FULL_KEY"
 FC_FILE=$(ls "$CRED/$AGENT"/*.json | grep -v "${FULL_KEY#ed25519:}" | head -1)
